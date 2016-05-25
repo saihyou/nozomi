@@ -1,0 +1,62 @@
+﻿/*
+  nozomi, a USI shogi playing engine
+  Copyright (C) 2016 Yuhei Ohmori
+
+  nozomi is free software: you can redistribute it and/or modify
+  it under the terms of the GNU General Public License as published by
+  the Free Software Foundation, either version 3 of the License, or
+  (at your option) any later version.
+
+  nozomi is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  GNU General Public License for more details.
+
+  You should have received a copy of the GNU General Public License
+  along with this program.  If not, see <http://www.gnu.org/licenses/>.
+*/
+
+#include <iostream>
+
+#include "bit_board.h"
+#include "evaluate.h"
+#include "position.h"
+#include "search.h"
+#include "thread.h"
+#include "transposition_table.h"
+#include "usi.h"
+#include "book.h"
+#include "learn.h"
+
+int
+main(int argc, char* argv[]) 
+{
+  std::cout << engine_info() << std::endl;
+
+  USI::init(Options);
+  BitBoard::initialize();
+
+  Position::initialize();
+  Search::init();
+  Eval::init();
+  Threads.init();
+
+  TT.resize(Options["USI_Hash"]);
+
+  if (Options["OwnBook"])
+    Search::BookManager.open(Options["BookFile"]);
+#ifndef LEARN
+  USI::loop(argc, argv);
+#else
+  std::string cmd;
+  for (int i = 1; i < argc; ++i)
+    cmd += std::string(argv[i]) + " ";
+  std::istringstream is(cmd);
+  Learner *learner = new Learner;
+  learner->learn(is);
+  delete learner;
+#endif
+  Threads.exit();
+
+  return 0;
+}
