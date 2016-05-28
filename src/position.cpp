@@ -229,13 +229,22 @@ Position::set(const std::string &sfen, Thread *t)
   }
 
   int piece_num = 1;
-  while (ss >> token && !isspace(token) && token != '-')
+  while (ss >> token && !isspace(token))
   {
+    if (token == '-')
+      continue;
+
     if (isdigit(token))
     {
       if (token == '1')
-        break;
-      piece_num = int(token - '0');
+      {
+        ss >> token;
+        piece_num = 10 + int(token - '0');
+      }
+      else
+      {
+        piece_num = int(token - '0');
+      }
     }
     else
     {
@@ -251,9 +260,8 @@ Position::set(const std::string &sfen, Thread *t)
     }
   }
 
-  ss >> std::skipws;
+  ss >> game_ply_;
 
-  game_ply_ = std::max(2 * (game_ply_ - 1), 0) + int(side_to_move_ == kWhite);
   this_thread_ = t;
   state_->hand_black = hand_[kBlack];
   state_->material = compute_material();
