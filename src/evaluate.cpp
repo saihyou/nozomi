@@ -275,24 +275,24 @@ evaluate(const Position &pos, SearchStack *ss)
     calc_difference(pos, last_move, ss);
     score = ss->black_kpp + ss->white_kpp + ss->kkp + ss->material;
 
-    assert(calc_full(pos) == score);
+    assert(calc_full(pos, ss) == score);
     ss->evaluated = true;
     score = pos.side_to_move() == kWhite ? -score : score;
     score /= kFvScale;
 
     assert(score > -kValueInfinite && score < kValueInfinite);
-
-    return score;
   }
+  else
+  {
+    score = calc_full(pos, ss);
+    ss->evaluated = true;
 
-  score = calc_full(pos, ss);
-  ss->evaluated = true;
+    score = pos.side_to_move() == kWhite ? -score : score;
 
-  score = pos.side_to_move() == kWhite ? -score : score;
+    score /= kFvScale;
 
-  score /= kFvScale;
-   
-  assert(score > -kValueInfinite && score < kValueInfinite);
+    assert(score > -kValueInfinite && score < kValueInfinite);
+  }
 
   return score + kTempo;
 }
