@@ -218,17 +218,6 @@ USI::loop(int argc, char* argv[])
       if (token == "gameover")
         is >> token;
     }
-    else if (token == "perft" || token == "divide")
-    {
-      int depth;
-      stringstream ss;
-      
-      is >> depth;
-      ss << Options["Hash"]    << " "
-         << Options["Threads"] << " " << depth << " current " << token;
-      
-      benchmark(pos, ss);
-    }
     else if (token == "key")
     {
       sync_cout << hex << uppercase << setfill('0')
