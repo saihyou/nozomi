@@ -1,6 +1,6 @@
 ﻿/*
   nozomi, a USI shogi playing engine
-  Copyright (C) 2014-2016 Yuhei Ohmori
+  Copyright (C) 2016 Yuhei Ohmori
 
   This code is based on Stockfish (Chess playing engin).
   Copyright (C) 2004-2008 Tord Romstad (Glaurung author)
