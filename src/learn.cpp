@@ -676,7 +676,7 @@ struct KppIndex
 
 constexpr int kFvWindow = 256;
 static PartEvaluater<std::atomic<float> > *g_part_param;
-static PartEvaluater<int16_t>            *g_part_value;
+static PartEvaluater<int16_t>             *g_part_value;
 
 int
 inverse_black_white_kpp_index(int i)
@@ -1064,12 +1064,13 @@ Learner::learn_phase1_body()
 
       if (move_data.use_learn)
       {
+        Depth depth = static_cast<Depth>(dist(engine));
         const Value recode_value =
           search_pv
           (
             pos,
             move_data.move,
-            static_cast<Depth>(dist(engine)),
+            depth,
             *counter_move_history
           );
 
@@ -1091,8 +1092,7 @@ Learner::learn_phase1_body()
           (
             pos,
             recode_value,
-            engine,
-            dist,
+            depth,
             *counter_move_history,
             legal_moves,
             move_data.move
@@ -1110,9 +1110,15 @@ Learner::learn_phase1_body()
               );
               move_data.pv_data.push_back(kMoveNone);
               other_pv_exist = true;
+              if (recode_value <= rm.score)
+                ++record_is_nth;
             }
-            if (recode_value <= rm.score)
-              ++record_is_nth;
+            else
+            {
+              if (recode_value <= rm.score)
+                record_is_nth += kPredictionsSize;
+              break;
+            }
           }
 
           for (int i = record_is_nth; i < kPredictionsSize; i++)
@@ -1817,8 +1823,6 @@ Learner::add_part_param()
           continue;
 
         RelativePosition kk(king1, king2);
-        if (kk.x <= 1 || kk.y <= 1)
-          continue;
         for (int i = 1; i < Eval::kFEEnd; ++i)
         {
           int32_t kkp_tmp = 0;
@@ -2013,6 +2017,10 @@ Learner::search_pv(Position &pos, Move record_move, Depth depth, CounterMoveHist
   counter_moves_history.clear();
   thread->history_.clear();
   thread->counter_moves_.clear();
+  thread->pv_index_ = 0;
+  thread->calls_count_ = 0;
+  thread->max_ply_ = 0;
+  thread->root_depth_ = kDepthZero;
 
   Search::RootMove &root_move = thread->root_moves_[0];
 
@@ -2028,6 +2036,7 @@ Learner::search_pv(Position &pos, Move record_move, Depth depth, CounterMoveHist
   root_move.pv.resize(1);
   for (Move *m = ss->pv; *m != kMoveNone; ++m)
     root_move.pv.push_back(*m);
+
   return best_value;
 }
 
@@ -2036,8 +2045,7 @@ Learner::search_other_pv
 (
   Position &pos,
   Value record_value,
-  std::default_random_engine &engine,
-  std::uniform_int_distribution<> &dist,
+  Depth depth,
   CounterMoveHistoryStats &counter_move_history,
   MoveList<kLegal> &legal_moves,
   Move record_move
@@ -2053,6 +2061,10 @@ Learner::search_other_pv
   counter_move_history.clear();
   thread->history_.clear();
   thread->counter_moves_.clear();
+  thread->pv_index_ = 0;
+  thread->calls_count_ = 0;
+  thread->max_ply_ = 0;
+  thread->root_depth_ = kDepthZero;
 
   thread->root_moves_.clear();
   for (auto &m : legal_moves)
@@ -2064,20 +2076,18 @@ Learner::search_other_pv
   for (size_t i = 0; i < 10 && i < thread->root_moves_.size(); i++)
   {
     thread->pv_index_ = i;
-    Value best_value =
-      Search::search
-      (
-        pos,
-        ss,
-        record_value - kFvWindow,
-        record_value + kFvWindow,
-        static_cast<Depth>(dist(engine)) + 1,
-        counter_move_history
-      );
+    Search::search
+    (
+      pos,
+      ss,
+      record_value - kFvWindow,
+      record_value + kFvWindow,
+      depth + 1,
+      counter_move_history
+    );
     std::stable_sort(thread->root_moves_.begin() + i, thread->root_moves_.end());
-    if (best_value < record_value - kFvWindow || best_value > record_value + kFvWindow)
-      break;
   }
+  std::stable_sort(thread->root_moves_.begin(), thread->root_moves_.end());
 }
 
 #endif

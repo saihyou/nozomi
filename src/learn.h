@@ -155,8 +155,7 @@ private:
   (
     Position &pos,
     Value record_value,
-    std::default_random_engine &engin,
-    std::uniform_int_distribution<> &dist,
+    Depth depth,
     CounterMoveHistoryStats &counter_move_history,
     MoveList<kLegal> &legal_moves,
     Move record_move

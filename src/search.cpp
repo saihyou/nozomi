@@ -661,7 +661,7 @@ search
         ,
         CounterMoveHistory
 #endif
-);
+      );
 
     return tt_value;
   }
