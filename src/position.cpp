@@ -265,7 +265,8 @@ Position::set(const std::string &sfen, Thread *t)
   this_thread_ = t;
   state_->hand_black = hand_[kBlack];
   state_->material = compute_material();
-  if (is_attacked(square_king_[side_to_move_], side_to_move_, occupied()))
+  state_->checkers_bb = attacks_to(square_king_[side_to_move_], ~side_to_move_, occupied());
+  if (state_->checkers_bb.test())
     state_->continuous_checks[~side_to_move_] = 1; 
 
   int list_index = 0;
