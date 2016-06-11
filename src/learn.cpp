@@ -926,7 +926,7 @@ Learner::learn_phase2_body(RawEvaluater &eval_data)
     for (auto &move_data : game_data.move_list)
     {
       PRINT_PV(pos.print());
-      if (!move_data.use_learn)
+      if (!move_data.use_learn || !move_data.other_pv_exist)
       {
         setup_states->push(StateInfo());
         pos.do_move(move_data.move, setup_states->top());
@@ -1076,8 +1076,9 @@ Learner::learn_phase1_body()
 
         ++move_count_;
         int record_is_nth = 0;
-        bool other_pv_exist = false;
+
         move_data.pv_data.clear();
+        move_data.other_pv_exist = false;
         if (-kValueMaxEvaluate < recode_value && recode_value < kValueMaxEvaluate)
         {
           move_data.pv_data.insert
@@ -1109,7 +1110,7 @@ Learner::learn_phase1_body()
                 std::end(rm.pv)
               );
               move_data.pv_data.push_back(kMoveNone);
-              other_pv_exist = true;
+              move_data.other_pv_exist = true;
               if (recode_value <= rm.score)
                 ++record_is_nth;
             }
@@ -1123,12 +1124,6 @@ Learner::learn_phase1_body()
 
           for (int i = record_is_nth; i < kPredictionsSize; i++)
             ++predictions_[i];
-        }
-
-        if (!other_pv_exist)
-        {
-          move_data.pv_data.clear();
-          move_data.use_learn = false;
         }
       }
       setup_states->push(StateInfo());

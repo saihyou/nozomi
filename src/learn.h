@@ -31,6 +31,7 @@ struct MoveData
 {
   Move move;
   bool use_learn;
+  bool other_pv_exist;
   std::vector<Move> pv_data;
 };
 
