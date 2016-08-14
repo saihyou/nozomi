@@ -1016,6 +1016,68 @@ Position::pseudo_legal(Move m) const
   return true;
 }
 
+bool
+Position::validate() const
+{
+  // 1段目にblackの歩と香と桂がないこと
+  if
+  (
+    (
+      (
+        piece_board_[kBlack][kPawn]
+        |
+        piece_board_[kBlack][kLance]
+        |
+        piece_board_[kBlack][kKnight]
+      )
+      &
+      RankMaskTable[kRank1]
+    ).test()
+  )
+    return false;
+
+  // 2段目にblackの桂がないこと
+  if ((piece_board_[kBlack][kKnight] & RankMaskTable[kRank2]).test())
+    return false;
+
+  // 9段目にwhiteの歩と香と桂がないこと
+  if
+  (
+    (
+      (
+        piece_board_[kWhite][kPawn]
+        |
+        piece_board_[kWhite][kLance]
+        |
+        piece_board_[kWhite][kKnight]
+      )
+      &
+      RankMaskTable[kRank9]
+    ).test()
+  )
+    return false;
+
+  // 8段目にwhiteの桂がないこと
+  if ((piece_board_[kWhite][kKnight] & RankMaskTable[kRank8]).test())
+    return false;
+
+  // 2歩になっていないこと
+  for (File f = kFile1; f <= kFile9; ++f)
+  {
+    for (Color c = kBlack; c <= kWhite; ++c)
+    {
+      if ((piece_board_[c][kPawn] & FileMaskTable[f]).popcount() > 1)
+        return false;
+    }
+  }
+
+  // 敵側の玉がとられないこと
+  if (is_attacked(square_king_[~side_to_move_], ~side_to_move_, occupied()))
+    return false;
+
+  return true;
+}
+
 void 
 Position::put_piece(Piece piece, Square sq)
 {

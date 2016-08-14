@@ -6,7 +6,7 @@ LDFLAGS = -pthread
 ifdef DEBUG
 CPPFLAGS += -g
 else
-CPPFLAGS += -O2 -DNDEBUG
+CPPFLAGS += -O3 -DNDEBUG
 endif
 
 ifdef LEARN

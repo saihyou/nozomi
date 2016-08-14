@@ -908,10 +908,10 @@ Learner::update_eval()
 }
 
 void
-Learner::learn_phase2_body(RawEvaluater &eval_data)
+Learner::learn_phase2_body(int thread_id)
 {
   SearchStack ss[2];
-  Thread *thread = new Thread();
+  RawEvaluater &eval_data = (thread_id == 0) ? base_eval_ : eval_list_[thread_id - 1];
   eval_data.clear();
   for 
   (
@@ -922,7 +922,8 @@ Learner::learn_phase2_body(RawEvaluater &eval_data)
   {
     GameData &game_data = game_list_[i];
     Search::StateStackPtr setup_states = Search::StateStackPtr(new std::stack<StateInfo>());
-    Position pos(game_data.start_position, thread);
+    Position &pos = position_list_[thread_id];
+    pos.set(game_data.start_position, Threads[thread_id + 1]);
     for (auto &move_data : game_data.move_list)
     {
       PRINT_PV(pos.print());
@@ -992,7 +993,6 @@ Learner::learn_phase2_body(RawEvaluater &eval_data)
       pos.do_move(move_data.move, setup_states->top());
     }
   }
-  delete thread;
 }
 
 void
@@ -1003,9 +1003,9 @@ Learner::learn_phase2()
     std::cout << "step" << step + 1 << "/" << step_num_ << " " << std::flush;
     game_count_ = 0;
     std::vector<std::thread> threads(thread_num_ - 1);
-    for (int i = 0; i < thread_num_ - 1; ++i)
-      threads[i] = std::thread([this, i] { learn_phase2_body(eval_list_[i]); });
-    learn_phase2_body(base_eval_);
+    for (int i = 1; i < thread_num_; ++i)
+      threads[i - 1] = std::thread([this, i] { learn_phase2_body(i); });
+    learn_phase2_body(0);
     for (auto &thread : threads)
       thread.join();
     for (auto &data : eval_list_)
@@ -1023,13 +1023,11 @@ Learner::learn_phase2()
 }
 
 void
-Learner::learn_phase1_body()
+Learner::learn_phase1_body(int thread_id)
 {
   std::random_device seed_gen;
   std::default_random_engine engine(seed_gen());
   std::uniform_int_distribution<> dist(min_depth_, max_depth_);
-  Thread *thread = new Thread();
-  CounterMoveHistoryStats *counter_move_history = new CounterMoveHistoryStats();
 
   for 
   (
@@ -1040,7 +1038,8 @@ Learner::learn_phase1_body()
   {
     GameData &game_data = game_list_[i];
     Search::StateStackPtr setup_states = Search::StateStackPtr(new std::stack<StateInfo>());
-    Position pos(game_data.start_position, thread);
+    Position &pos = position_list_[thread_id];
+    pos.set(game_data.start_position, Threads[thread_id + 1]);
 
     for (auto &move_data : game_data.move_list)
     {
@@ -1071,7 +1070,7 @@ Learner::learn_phase1_body()
             pos,
             move_data.move,
             depth,
-            *counter_move_history
+            *counter_move_history_list_[thread_id]
           );
 
         ++move_count_;
@@ -1081,6 +1080,7 @@ Learner::learn_phase1_body()
         move_data.other_pv_exist = false;
         if (-kValueMaxEvaluate < recode_value && recode_value < kValueMaxEvaluate)
         {
+          Thread *thread = pos.this_thread();
           move_data.pv_data.insert
           (
             std::end(move_data.pv_data),
@@ -1094,7 +1094,7 @@ Learner::learn_phase1_body()
             pos,
             recode_value,
             depth,
-            *counter_move_history,
+            *counter_move_history_list_[thread_id],
             legal_moves,
             move_data.move
           );
@@ -1111,15 +1111,9 @@ Learner::learn_phase1_body()
               );
               move_data.pv_data.push_back(kMoveNone);
               move_data.other_pv_exist = true;
-              if (recode_value <= rm.score)
-                ++record_is_nth;
             }
-            else
-            {
-              if (recode_value <= rm.score)
-                record_is_nth += kPredictionsSize;
-              break;
-            }
+            if (recode_value <= rm.score)
+              ++record_is_nth;
           }
 
           for (int i = record_is_nth; i < kPredictionsSize; i++)
@@ -1130,8 +1124,6 @@ Learner::learn_phase1_body()
       pos.do_move(move_data.move, setup_states->top());
     }
   }
-  delete counter_move_history;
-  delete thread;
 }
 
 void
@@ -1150,10 +1142,9 @@ Learner::learn_phase1()
   Search::Signals.stop = false;
 
   std::vector<std::thread> threads(thread_num_ - 1);
-  for (auto &thread : threads)
-    thread = std::thread([this] { learn_phase1_body(); });
-  learn_phase1_body();
-
+  for (int i = 1; i < thread_num_; ++i)
+    threads[i - 1] = std::thread([this, i] { learn_phase1_body(i); });
+  learn_phase1_body(0);
   for (auto &thread : threads)
     thread.join();
 
@@ -1223,6 +1214,13 @@ Learner::learn(std::istringstream &is)
   set_update_mask(step_num_);
   for (int i = 0; i < thread_num_ - 1; ++i)
     eval_list_.push_back(base_eval_);
+
+  for (int i = 0; i < thread_num_; ++i)
+  {
+    position_list_.push_back(Position());
+    Threads.push_back(new Thread);
+    counter_move_history_list_.push_back(std::unique_ptr<CounterMoveHistoryStats>(new CounterMoveHistoryStats));
+  }
 
   read_file(record_file_name);
   if (game_num_for_iteration_ == 0)
@@ -1495,6 +1493,11 @@ Learner::add_part_param()
                 );
                 add_atmic_float
                 (
+                  g_part_param->rel_kpd_hand[kpp_index.i][pj.color][rlpj.y][rlpj.x][pj.directions[d]],
+                  base_eval_.kpp_raw[king][i][j]
+                );
+                add_atmic_float
+                (
                   g_part_param->rel_pd_hand[kpp_index.i][pj.color][pj.directions[d]],
                   base_eval_.kpp_raw[king][i][j]
                 );
@@ -1509,6 +1512,7 @@ Learner::add_part_param()
                 tmp += g_part_value->abs_kpd[kpp_index.king][kpp_index.i][pj.color][pj.square][pj.directions[d]];
                 tmp += g_part_value->abs_pd[kpp_index.i][pj.color][lpj.square][pj.directions[d]];
                 tmp += g_part_value->abs_kd[kpp_index.king][pj.color][pj.square][pj.directions[d]];
+                tmp += g_part_value->rel_kpd_hand[kpp_index.i][pj.color][rlpj.y][rlpj.x][pj.directions[d]];
                 tmp += g_part_value->rel_pd_hand[kpp_index.i][pj.color][pj.directions[d]];
                 tmp += g_part_value->rel_kd_board[pj.color][rlpj.y][rlpj.x][pj.directions[d]];
               }
@@ -1517,7 +1521,7 @@ Learner::add_part_param()
             if (!Divide)
             {
               kpp_tmp += static_cast<int32_t>((std::round(static_cast<double>(tmp) / static_cast<double>(pj.direction_num))));
-              ++part_num += 5;
+              ++part_num += 6;
             }
           }
           else
@@ -1832,12 +1836,6 @@ Learner::add_part_param()
 
           PieceParam pp(i);
           int pi = i;
-          if (pp.color == kWhite)
-          {
-            king1 = static_cast<Square>(kBoardSquare - 1 - k2);
-            king2 = static_cast<Square>(kBoardSquare - 1 - k1);
-            pi = inv_i;
-          }
           KingPosition ksq1(king1);
           BoardPosition ksq2(king2);
           if (ksq1.swap)
@@ -1954,7 +1952,7 @@ Learner::add_part_kp_kkp_param(Square king, int kp_i, int sign, Square king1, Sq
   }
   else
   {
-    value += g_part_value->abs_kp[kp.lower_square()][kp_i];
+    value += sign * g_part_value->abs_kp[kp.lower_square()][kp_i];
     ++num;
   }
 

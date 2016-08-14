@@ -254,6 +254,13 @@ USI::loop(int argc, char* argv[])
     {
       sync_cout << "readyok" << sync_endl;
     }
+    else if (token == "valid")
+    {
+      if (pos.validate())
+        sync_cout << "true"  << sync_endl;
+      else
+        sync_cout << "false" << sync_endl;
+    }
     else
     {
       sync_cout << "Unknown command: " << cmd << sync_endl;

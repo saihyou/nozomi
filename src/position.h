@@ -206,6 +206,8 @@ public:
   legal(Move m, BitBoard &pinned) const;
   bool
   pseudo_legal(Move m) const;
+  bool
+  validate() const;
 
 private:
   void 

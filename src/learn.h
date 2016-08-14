@@ -114,13 +114,13 @@ private:
   set_move(std::string &game, std::set<std::pair<Key, Move> > &dictionary);
 
   void
-  learn_phase1_body();
+  learn_phase1_body(int thread_id);
 
   void
   learn_phase1();
 
   void
-  learn_phase2_body(RawEvaluater &eval_data);
+  learn_phase2_body(int thread_id);
 
   void
   learn_phase2();
@@ -165,6 +165,8 @@ private:
 
   std::vector<GameData> game_list_;
   std::vector<RawEvaluater> eval_list_;
+  std::vector<Position> position_list_;
+  std::vector<std::unique_ptr<CounterMoveHistoryStats>> counter_move_history_list_;
   RawEvaluater base_eval_;
   std::atomic<int64_t> predictions_[kPredictionsSize];
   std::atomic<int64_t> move_count_;

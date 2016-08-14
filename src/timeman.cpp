@@ -63,9 +63,4 @@ TimeManagement::init(const Search::LimitsType &limits, Color us)
     optimum_search_time_ += limits.inc[us];
     maximum_search_time_ += limits.inc[us];
   }
-
-  if (optimum_search_time_ < 1000)
-    optimum_search_time_ = 900;
-  if (maximum_search_time_ < 1000)
-    maximum_search_time_ = 900;
 }
