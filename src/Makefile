@@ -11,7 +11,7 @@ endif
 
 ifdef LEARN
 CPPFLAGS += -fopenmp -DLEARN
-OBJS += learn.o
+OBJS += learn.o reinforcer.o
 LDFLAGS += -fopenmp
 endif
 

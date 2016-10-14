@@ -32,15 +32,12 @@ public:
   void 
   init(const Search::LimitsType &limits, Color us);
   
-  void 
-  pv_instability(double best_move_changes);
-  
-  int 
-  available_time() const 
-  { 
-    return static_cast<int>(optimum_search_time_ * unstable_pv_factor_ * 0.71); 
+  int
+  optimum() const
+  {
+    return optimum_search_time_;
   }
-  
+
   int 
   maximum() const 
   { 
@@ -53,10 +50,16 @@ public:
     return int(now() - start_time_);
   }
 
+  bool
+  only_byoyomi() const
+  {
+    return only_byoyomi_;
+  }
+
 private:
   int optimum_search_time_;
   int maximum_search_time_;
-  double unstable_pv_factor_;
+  bool only_byoyomi_ = false;
   std::chrono::milliseconds::rep start_time_;
 };
 

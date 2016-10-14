@@ -198,7 +198,8 @@ enum Square
   kWhiteHandGold   = kWhiteHandSilver + 4,
   kWhiteHandBishop = kWhiteHandGold   + 4,
   kWhiteHandRook   = kWhiteHandBishop + 2,
-  kSquareHand      = kWhiteHandRook   + 3
+  kSquareHand      = kWhiteHandRook   + 3,
+  kNumberOfBoardHand = kBoardSquare + kGold
 };
 
 enum File

@@ -316,14 +316,18 @@ inverse(Square sq)
   return static_cast<Square>(kBoardSquare - 1 - sq);
 }
 
-extern bool
+bool
 init();
 
-extern Value 
+Value 
 evaluate(const Position &pos, SearchStack *ss);
+
+Value
+calc_kkpt_value(const Position &pos);
 
 extern int16_t KPP[kBoardSquare][kFEEnd][kFEEnd];
 extern int16_t KKP[kBoardSquare][kBoardSquare][kFEEnd];
+extern int16_t KKPT[kBoardSquare][kBoardSquare][kFEEnd][kNumberOfColor];
 
 } // namespace Eval
 

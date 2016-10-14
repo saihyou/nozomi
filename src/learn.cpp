@@ -100,144 +100,6 @@ template<typename Type> struct PartEvaluater
   }
 };
 
-struct BoardPosition
-{
-  BoardPosition() : x(9), y(9) {}
-  BoardPosition(Square sq)
-  {
-    x = sq % 9;
-    y = sq / 9;
-  }
-
-  Square
-  square() const
-  {
-    return Square(y * 9 + x);
-  }
-
-  Square
-  inverse_square() const
-  {
-    int inverse_x = kFile9 - x;
-    return Square(y * 9 + inverse_x);
-  }
-
-  Square
-  lower_square() const
-  {
-    int lower_x = x;
-    if (x > kFile5)
-      lower_x = kFile9 - x;
-     return Square(y * 9 + lower_x);
-  }
-
-  Square
-  inverse_black_white() const
-  {
-    return Square(kBoardSquare - 1 - square());
-  }
-
-  int x;
-  int y;
-};
-
-struct KingPosition : BoardPosition
-{
-  KingPosition(Square sq)
-  {
-    x = sq % 9;
-    if (x > kFile5)
-    {
-      x = kFile9 - x;
-      swap = true;
-    }
-    y = sq / 9;
-  }
-  bool swap = false;
-};
-
-struct RelativePosition
-{
-  RelativePosition(Square base, Square sq)
-  {
-    BoardPosition bp = BoardPosition(base);
-    BoardPosition sqp = BoardPosition(sq);
-
-    x = sqp.x - bp.x + 8;
-    y = sqp.y - bp.y + 8;
-  }
-
-  int x;
-  int y;
-};
-
-const int
-KPPIndexTable[] =
-{
-  Eval::kFHandPawn,
-  Eval::kEHandPawn,
-  Eval::kFHandLance,
-  Eval::kEHandLance,
-  Eval::kFHandKnight,
-  Eval::kEHandKnight,
-  Eval::kFHandSilver,
-  Eval::kEHandSilver,
-  Eval::kFHandGold,
-  Eval::kEHandGold,
-  Eval::kFHandBishop,
-  Eval::kEHandBishop,
-  Eval::kFHandRook,
-  Eval::kEHandRook,
-  Eval::kFPawn,
-  Eval::kEPawn,
-  Eval::kFLance,
-  Eval::kELance,
-  Eval::kFKnight,
-  Eval::kEKnight,
-  Eval::kFSilver,
-  Eval::kESilver,
-  Eval::kFGold,
-  Eval::kEGold,
-  Eval::kFBishop,
-  Eval::kEBishop,
-  Eval::kFHorse,
-  Eval::kEHorse,
-  Eval::kFRook,
-  Eval::kERook,
-  Eval::kFDragon,
-  Eval::kEDragon,
-  Eval::kFEEnd
-};
-
-int
-kpp_index_begin(int i)
-{
-  return *(std::upper_bound(std::begin(KPPIndexTable), std::end(KPPIndexTable), i) - 1);
-}
-
-int
-inverse_file_kpp_index(int i)
-{
-  if (i < Eval::kFEHandEnd)
-    return i;
-
-  const int begin = kpp_index_begin(i);
-  const Square sq = static_cast<Square>(i - begin);
-  const BoardPosition pos = BoardPosition(sq);
-  return static_cast<int>(begin + pos.inverse_square());
-}
-
-int
-lower_file_kpp_index(int i)
-{
-  if (i < Eval::kFEHandEnd)
-    return i;
-
-  const int begin = kpp_index_begin(i);
-  const Square sq = static_cast<Square>(i - begin);
-  const BoardPosition pos = BoardPosition(sq);
-  return static_cast<int>(begin + pos.lower_square());
-}
 
 struct PieceParam
 {
@@ -623,55 +485,19 @@ struct PieceParam
   int hand_piece_num;
 };
 
-struct KppIndex
+struct RelativePosition
 {
-  KppIndex(Square k, int in_i, int in_j)
+  RelativePosition(Square base, Square sq)
   {
-    if (in_i == in_j)
-    {
-      i = 0;
-      j = 0;
-      king = kBoardSquare;
-      return;
-    }
+    BoardPosition bp = BoardPosition(base);
+    BoardPosition sqp = BoardPosition(sq);
 
-    if (in_j < in_i)
-      std::swap(in_i, in_j);
-    KingPosition kp(k);
-    if (kp.swap)
-    {
-      in_i = inverse_file_kpp_index(in_i);
-      in_j = inverse_file_kpp_index(in_j);
-      if (in_j < in_i)
-        std::swap(in_i, in_j);
-    }
-    else if (kp.x == kFile5)
-    {
-      if (in_i >= Eval::kFPawn)
-      {
-        const int begin = kpp_index_begin(in_i);
-        const BoardPosition i_pos(static_cast<Square>(in_i - begin));
-        if (i_pos.x > kFile5)
-        {
-          in_i = begin + i_pos.inverse_square();
-          in_j = inverse_file_kpp_index(in_j);
-        }
-        else if (i_pos.x == kFile5)
-        {
-          in_j = lower_file_kpp_index(in_j);
-        }
-        if (in_j < in_i)
-          std::swap(in_i, in_j);
-      }
-    }
-    i = in_i;
-    j = in_j;
-    king = kp.square();
+    x = sqp.x - bp.x + 8;
+    y = sqp.y - bp.y + 8;
   }
 
-  Square king;
-  int i;
-  int j;
+  int x;
+  int y;
 };
 
 constexpr int kFvWindow = 256;
@@ -1069,8 +895,7 @@ Learner::learn_phase1_body(int thread_id)
           (
             pos,
             move_data.move,
-            depth,
-            *counter_move_history_list_[thread_id]
+            depth
           );
 
         ++move_count_;
@@ -1094,7 +919,6 @@ Learner::learn_phase1_body(int thread_id)
             pos,
             recode_value,
             depth,
-            *counter_move_history_list_[thread_id],
             legal_moves,
             move_data.move
           );
@@ -1219,7 +1043,6 @@ Learner::learn(std::istringstream &is)
   {
     position_list_.push_back(Position());
     Threads.push_back(new Thread);
-    counter_move_history_list_.push_back(std::unique_ptr<CounterMoveHistoryStats>(new CounterMoveHistoryStats));
   }
 
   read_file(record_file_name);
@@ -1993,7 +1816,7 @@ Learner::add_part_kp_kkp_param(Square king, int kp_i, int sign, Square king1, Sq
 }
 
 Value
-Learner::search_pv(Position &pos, Move record_move, Depth depth, CounterMoveHistoryStats &counter_moves_history)
+Learner::search_pv(Position &pos, Move record_move, Depth depth)
 {
   SearchStack stack[kMaxPly + 4];
   SearchStack *ss = stack + 2;
@@ -2007,9 +1830,10 @@ Learner::search_pv(Position &pos, Move record_move, Depth depth, CounterMoveHist
   thread->root_moves_.clear();
   thread->root_moves_.push_back(Search::RootMove(record_move));
 
-  counter_moves_history.clear();
   thread->history_.clear();
   thread->counter_moves_.clear();
+  thread->counter_move_history_.clear();
+  thread->from_to_.clear();
   thread->pv_index_ = 0;
   thread->calls_count_ = 0;
   thread->max_ply_ = 0;
@@ -2022,7 +1846,7 @@ Learner::search_pv(Position &pos, Move record_move, Depth depth, CounterMoveHist
   (ss - 1)->ply = 1;
   
   pos.do_move(record_move, new_info);
-  best_value = -Search::search(pos, ss, -kValueMaxEvaluate, kValueMaxEvaluate, depth, counter_moves_history);
+  best_value = -Search::search(pos, ss, -kValueMaxEvaluate, kValueMaxEvaluate, depth);
   pos.undo_move(record_move);
 
   root_move.score = best_value;
@@ -2039,7 +1863,6 @@ Learner::search_other_pv
   Position &pos,
   Value record_value,
   Depth depth,
-  CounterMoveHistoryStats &counter_move_history,
   MoveList<kLegal> &legal_moves,
   Move record_move
 )
@@ -2051,9 +1874,10 @@ Learner::search_other_pv
 
   Thread *thread = pos.this_thread();
 
-  counter_move_history.clear();
   thread->history_.clear();
   thread->counter_moves_.clear();
+  thread->counter_move_history_.clear();
+  thread->from_to_.clear();
   thread->pv_index_ = 0;
   thread->calls_count_ = 0;
   thread->max_ply_ = 0;
@@ -2075,8 +1899,7 @@ Learner::search_other_pv
       ss,
       record_value - kFvWindow,
       record_value + kFvWindow,
-      depth + 1,
-      counter_move_history
+      depth + 1
     );
     std::stable_sort(thread->root_moves_.begin() + i, thread->root_moves_.end());
   }

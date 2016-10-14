@@ -232,7 +232,7 @@ USI::loop(int argc, char* argv[])
     }
     else if (token == "usinewgame")
     {
-      TT.clear();
+      Search::clear();
     }
     else if (token == "go")
     {
@@ -260,6 +260,11 @@ USI::loop(int argc, char* argv[])
         sync_cout << "true"  << sync_endl;
       else
         sync_cout << "false" << sync_endl;
+    }
+    else if (token == "ismate")
+    {
+      Move move = search_mate1ply(pos);
+      sync_cout << USI::format_move(move) << sync_endl;
     }
     else
     {

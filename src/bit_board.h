@@ -73,6 +73,11 @@ extern BitBoard
 Left45AttacksTable[kBoardSquare][128];
 extern BitBoard
 Right45AttacksTable[kBoardSquare][128];
+extern BitBoard
+RookStepAttacksTable[kBoardSquare];
+extern BitBoard
+BishopStepAttacksTable[kBoardSquare];
+
 
 extern Direction
 DirectionTable[kBoardSquare][kBoardSquare];
@@ -84,6 +89,8 @@ extern const BitBoard
 PromotableMaskTable[kNumberOfColor];
 extern const BitBoard
 MustPromoteMaskTable[kNumberOfColor];
+extern const  BitBoard
+NotPromotableMaskTable[kNumberOfColor];
 
 constexpr File
 FilePositionTable[kBoardSquare] =

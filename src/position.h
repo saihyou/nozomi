@@ -128,14 +128,16 @@ public:
   do_move(Move m, StateInfo &new_state);
   void
   do_null_move(StateInfo &new_state);
-  void
-  do_temporary_move(Move m);
   void 
   undo_move(Move m);
   void 
   undo_null_move();
+
   void
-  undo_temporary_move(Move m);
+  move_temporary(Square from, Square to, PieceType type, PieceType capture);
+  void
+  move_with_promotion_temporary(Square from, Square to, PieceType type, PieceType capture);
+
 
   Color 
   side_to_move() const;
@@ -164,6 +166,8 @@ public:
 
   uint64_t
   key() const;
+  uint64_t
+  key_after(Move m) const;
   int 
   material() const;
   Value 
@@ -199,6 +203,8 @@ public:
   BitBoard
   pinned_pieces(Color c) const;
   BitBoard
+  pinned_pieces(Color c, const BitBoard &occupied) const;
+  BitBoard
   discovered_check_candidates() const;
   BitBoard
   checkers_bitboard() const;
@@ -208,6 +214,8 @@ public:
   pseudo_legal(Move m) const;
   bool
   validate() const;
+  bool
+  is_decralation_win() const;
 
 private:
   void 
@@ -220,7 +228,7 @@ private:
   bool 
   is_pawn_exist(Square sq, Color color) const;
   BitBoard
-  check_blockers(Color c, Color king_color) const;
+  check_blockers(Color c, Color king_color, const BitBoard &occupied) const;
   Value
   see(Move move, Color move_color) const;
  
@@ -421,13 +429,19 @@ Position::is_attacked(Square sq, Color color, const BitBoard &occupied) const
 inline BitBoard
 Position::pinned_pieces(Color c) const
 {
-  return check_blockers(c, c);
+  return check_blockers(c, c, occupied());
+}
+
+inline BitBoard
+Position::pinned_pieces(Color c, const BitBoard &occupied) const
+{
+  return check_blockers(c, c, occupied);
 }
 
 inline BitBoard
 Position::discovered_check_candidates() const
 {
-  return check_blockers(side_to_move_, ~side_to_move_);
+  return check_blockers(side_to_move_, ~side_to_move_, occupied());
 }
 
 inline bool
@@ -484,6 +498,35 @@ inline int
 Position::list_index_move() const
 {
   return state_->list_index_move;
+}
+
+inline void
+Position::move_temporary(Square from, Square to, PieceType type, PieceType capture)
+{
+  const BitBoard  set_clear = MaskTable[from] | MaskTable[to];
+  piece_board_[side_to_move_][kOccupied] ^= set_clear;
+  piece_board_[side_to_move_][type] ^= set_clear;
+  if (capture != kPieceNone)
+  {
+    Color enemy = ~side_to_move_;
+    piece_board_[enemy][capture].xor_bit(to);
+    piece_board_[enemy][kOccupied].xor_bit(to);
+  }
+}
+
+inline void
+Position::move_with_promotion_temporary(Square from, Square to, PieceType type, PieceType capture)
+{
+  const BitBoard  set_clear = MaskTable[from] | MaskTable[to];
+  piece_board_[side_to_move_][kOccupied] ^= set_clear;
+  piece_board_[side_to_move_][type].xor_bit(from);
+  piece_board_[side_to_move_][type + kFlagPromoted].xor_bit(to);
+  if (capture != kPieceNone)
+  {
+    Color enemy = ~side_to_move_;
+    piece_board_[enemy][capture].xor_bit(to);
+    piece_board_[enemy][kOccupied].xor_bit(to);
+  }
 }
 
 #endif

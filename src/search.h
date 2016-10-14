@@ -46,10 +46,12 @@ struct SearchStack
   Value  black_kpp;
   Value  white_kpp;
   Value  kkp;
+  Value  kkpt;
   Value  material;
   bool   evaluated;
   bool   skip_early_pruning;
   int    move_count;
+  CounterMoveStats *counter_moves;
 };
 
 namespace Search 
@@ -69,9 +71,6 @@ struct RootMove
   { 
     return pv[0] == m;
   }
-
-  void 
-  insert_pv_in_tt(Position &pos);
 
   bool
   extract_ponder_from_tt(Position &pos);
@@ -140,10 +139,11 @@ init();
 void
 clear();
 
-#ifdef LEARN
 Value
-search(Position &pos, SearchStack *ss, Value alpha, Value beta, Depth depth, CounterMoveHistoryStats &CounterMoveHistory);
-#endif
+search(Position &pos, SearchStack *ss, Value alpha, Value beta, Depth depth);
+
+Value
+qsearch(Position &pos, SearchStack *ss, Value alpha, Value beta);
 } // namespace
 
 

@@ -73,7 +73,7 @@ benchmark(const Position& current, istream& is)
 
   Options["Hash"]    = tt_size;
   Options["Threads"] = threads;
-  TT.clear();
+  Search::clear();
 
   if (limitType == "time")
     limits.movetime = 1000 * atoi(limit.c_str());

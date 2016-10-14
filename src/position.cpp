@@ -536,7 +536,7 @@ Position::do_move(Move m, StateInfo &new_state, bool gives_check)
       state_->list_index_move = kpp_index;
     }
   }
-  prefetch(TT.first_entry(board_key + hand_key));
+
   state_->board_key = board_key;
   state_->hand_key = hand_key;
   state_->hand_black = hand_[kBlack];
@@ -625,110 +625,6 @@ Position::undo_move(Move move)
     }
   }
   state_ = state_->previous;
-}
-
-void
-Position::do_temporary_move(Move m)
-{
-  Square   from      = move_from(m);
-  Square   to        = move_to(m);
-  Color    us        = side_to_move_;
-
-  if (from >= kBoardSquare)
-  {
-    const PieceType drop = to_drop_piece_type(from);
-    assert(drop != kOccupied);
-    piece_board_[us][drop].xor_bit(to);
-    squares_[to] = make_piece(drop, us);
-    piece_board_[us][kOccupied].xor_bit(to);
-    sub_hand(hand_[us], drop);
-  }
-  else
-  {
-    const PieceType piece_move = move_piece_type(m);
-    const bool      is_promote = move_is_promote(m);
-    BitBoard        set_clear  = MaskTable[from] | MaskTable[to];
-
-    piece_board_[us][kOccupied] ^= set_clear;
-    squares_[from] = kEmpty;
-
-    if (is_promote)
-    {
-      piece_board_[us][piece_move].xor_bit(from);
-      piece_board_[us][piece_move + kFlagPromoted].xor_bit(to);
-      squares_[to] = make_piece(piece_move + kFlagPromoted, us);
-    }
-    else
-    {
-      piece_board_[us][piece_move] ^= set_clear;
-      squares_[to] = make_piece(piece_move, us);
-      if (piece_move == kKing)
-        square_king_[us] = static_cast<Square>(to);
-    }
-  }
-
-  const PieceType piece_capture = move_capture(m);
-  if (piece_capture != kPieceNone)
-  {
-    const Color enemy = ~us;
-    piece_board_[enemy][piece_capture].xor_bit(to);
-    add_hand(hand_[us], piece_capture);
-    piece_board_[enemy][kOccupied].xor_bit(to);
-  }
-  side_to_move_ = ~side_to_move_;
-}
-
-void
-Position::undo_temporary_move(Move m)
-{
-  side_to_move_ = ~side_to_move_;
-
-  Square from = move_from(m);
-  Square to   = move_to(m);
-
-  if (from >= kBoardSquare)
-  {
-    PieceType drop = to_drop_piece_type(from);
-    assert(drop != kOccupied);
-    piece_board_[side_to_move_][drop].xor_bit(to);
-    add_hand(hand_[side_to_move_], drop);
-    squares_[to] = kEmpty;
-    piece_board_[side_to_move_][kOccupied].xor_bit(to);
-  }
-  else
-  {
-    PieceType piece_move = move_piece_type(m);
-    bool      is_promote = move_is_promote(m);
-    BitBoard  set_clear  = MaskTable[from] | MaskTable[to];
-    piece_board_[side_to_move_][kOccupied] ^= set_clear;
-    if (is_promote)
-    {
-      piece_board_[side_to_move_][piece_move].xor_bit(from);
-      piece_board_[side_to_move_][piece_move + kFlagPromoted].xor_bit(to);
-      squares_[from] = make_piece(piece_move, side_to_move_);
-    }
-    else
-    {
-      piece_board_[side_to_move_][piece_move] ^= set_clear;
-      squares_[from] = make_piece(piece_move, side_to_move_);
-      if (piece_move == kKing)
-        square_king_[side_to_move_] = static_cast<Square>(from);
-    }
-
-    PieceType piece_capture = move_capture(m);
-    if (piece_capture != kPieceNone)
-    {
-      Color enemy = ~side_to_move_;
-      piece_board_[enemy][piece_capture].xor_bit(to);
-      sub_hand(hand_[side_to_move_], piece_capture);
-      squares_[to] = make_piece(piece_capture, enemy);
-      piece_board_[enemy][kOccupied].xor_bit(to);
-    }
-    else
-    {
-      squares_[to] = kEmpty;
-    }
-  }
 }
 
 bool 
@@ -829,7 +725,7 @@ Position::is_pawn_exist(Square sq, Color color) const
 }
 
 BitBoard
-Position::check_blockers(Color c, Color king_color) const
+Position::check_blockers(Color c, Color king_color, const BitBoard &occupied) const
 {
   BitBoard result;
   result.init();
@@ -841,7 +737,7 @@ Position::check_blockers(Color c, Color king_color) const
   while (pinners.test())
   {
     Square sq = pinners.pop_bit();
-    const BitBoard b = BetweenTable[king_square][sq] & occupied();
+    const BitBoard b = BetweenTable[king_square][sq] & occupied;
     if (_mm_popcnt_u64(b.to_uint64()) == 1)
       result |= b & piece_board_[c][kOccupied];
   }
@@ -1030,7 +926,7 @@ Position::validate() const
         |
         piece_board_[kBlack][kKnight]
       )
-      &
+      & 
       RankMaskTable[kRank1]
     ).test()
   )
@@ -1055,7 +951,7 @@ Position::validate() const
       RankMaskTable[kRank9]
     ).test()
   )
-    return false;
+    return false;  
 
   // 8段目にwhiteの桂がないこと
   if ((piece_board_[kWhite][kKnight] & RankMaskTable[kRank8]).test())
@@ -1306,6 +1202,50 @@ Position::see(Move move, Color move_color) const
   return static_cast<Value>(swap_list[0]);
 }
 
+uint64_t
+Position::key_after(Move m) const
+{
+  uint64_t board_key = state_->board_key;
+  uint64_t hand_key = state_->hand_key;
+  Square from = move_from(m);
+  Square to = move_to(m);
+  Color us = side_to_move_;
+
+  board_key ^= Zobrist::side;
+
+  if (from >= kBoardSquare)
+  {
+    PieceType drop = to_drop_piece_type(from);
+    hand_key -= Zobrist::hands[us][drop];
+    board_key += Zobrist::tables[us][drop][to];
+  }
+  else
+  {
+    PieceType piece_move = move_piece_type(m);
+    bool is_promote = move_is_promote(m);
+    if (is_promote)
+    {
+      board_key -= Zobrist::tables[us][piece_move][from];
+      board_key += Zobrist::tables[us][piece_move + kFlagPromoted][to];
+    }
+    else
+    {
+      board_key -= Zobrist::tables[us][piece_move][from];
+      board_key += Zobrist::tables[us][piece_move][to];
+    }
+
+    PieceType piece_capture = move_capture(m);
+    if (piece_capture != kPieceNone)
+    {
+      Color enemy = ~us;
+      board_key -= Zobrist::tables[enemy][piece_capture][to];
+      hand_key += Zobrist::hands[us][piece_capture & 0x7];
+    }
+  }
+
+  return board_key + hand_key;
+}
+
 uint64_t 
 Position::exclusion_key() const
 {
@@ -1380,4 +1320,65 @@ void
 Position::print() const
 {
   std::cout << *this << std::endl;
+}
+
+bool
+Position::is_decralation_win() const
+{
+  Color us = side_to_move_;
+  // 宣言する者の玉が入玉している
+  if (us == kBlack)
+  {
+    if (square_king_[kBlack] > k1C)
+      return false;
+  }
+  else
+  {
+    if (square_king_[kWhite] < k9G)
+      return false;
+  }
+
+  // 宣言する者の敵陣にいる駒は、玉を除いて10枚以上である
+  if
+  (
+    ((piece_board_[us][kOccupied] ^ piece_board_[us][kKing]) & PromotableMaskTable[us]).popcount()
+    <
+    10
+  )
+    return false;
+
+  // 宣言する者の玉に王手がかかっていない
+  if (in_check())
+    return false;
+
+  BitBoard large_pieces = piece_board_[us][kBishop] | piece_board_[us][kRook] | piece_board_[us][kDragon] | piece_board_[us][kHorse];
+  BitBoard small_pieces = (piece_board_[us][kOccupied] ^ piece_board_[us][kKing]);
+  small_pieces.not_and(large_pieces);
+
+  int large_score =
+    static_cast<int>(large_pieces.popcount())
+    +
+    number_of(hand_[us], kBishop)
+    +
+    number_of(hand_[us], kBishop)
+    +
+    number_of(hand_[us], kRook);
+  int small_score = 
+    static_cast<int>(small_pieces.popcount())
+    +
+    number_of(hand_[us], kPawn)
+    +
+    number_of(hand_[us], kLance)
+    +
+    number_of(hand_[us], kKnight)
+    +
+    number_of(hand_[us], kSilver)
+    +
+    number_of(hand_[us], kGold);
+  
+  int score = small_score + 5 * large_score;
+  if (us == kBlack)
+    return score >= 28;
+  else
+    return score >= 27;
 }

@@ -27,6 +27,7 @@
 #include "usi.h"
 #include "book.h"
 #include "learn.h"
+#include "reinforcer.h"
 
 int
 main(int argc, char* argv[]) 
@@ -48,13 +49,25 @@ main(int argc, char* argv[])
 #ifndef LEARN
   USI::loop(argc, argv);
 #else
+  if (argc < 2)
+    return 1;
+
+  std::string type(argv[1]);
   std::string cmd;
-  for (int i = 1; i < argc; ++i)
+  for (int i = 2; i < argc; ++i)
     cmd += std::string(argv[i]) + " ";
   std::istringstream is(cmd);
-  Learner *learner = new Learner;
-  learner->learn(is);
-  delete learner;
+
+  if (type == "bonanza")
+  {
+    std::unique_ptr<Learner> learner(new Learner);
+    learner->learn(is);
+  }
+  else if (type == "reinforce")
+  {
+    std::unique_ptr<Reinforcer> leinforcer(new Reinforcer);
+    leinforcer->reinforce(is);
+  }
 #endif
   Threads.exit();
 

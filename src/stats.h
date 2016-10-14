@@ -77,4 +77,35 @@ typedef Stats<Value, false> HistoryStats;
 typedef Stats<Value, true> CounterMoveStats;
 typedef Stats<CounterMoveStats> CounterMoveHistoryStats;
 
+struct FromToStats
+{
+  Value
+  get(Color c, Move m) const
+  {
+    return table[c][move_from(m)][move_to(m)];
+  }
+
+  void
+  clear()
+  {
+    std::memset(table, 0, sizeof(table));
+  }
+
+  void
+  update(Color c, Move m, Value v)
+  {
+    if (abs(int(v)) >= 324)
+      return;
+
+    Square f = move_from(m);
+    Square t = move_to(m);
+    assert(f < kNumberOfBoardHand);
+    table[c][f][t] -= table[c][f][t] * abs(int(v)) / 324;
+    table[c][f][t] += int(v) * 32;
+  }
+
+private:
+  Value table[kNumberOfColor][kNumberOfBoardHand][kBoardSquare];
+};
+
 #endif

@@ -105,6 +105,12 @@ PromotableMaskTable[kNumberOfColor] =
 };
 
 const BitBoard
+NotPromotableMaskTable[kNumberOfColor] =
+{
+  BitBoard(0x7FFFFFFFF8000000ULL, 0x3FFFFULL), BitBoard(0x3FFFFFFFFFFFFFULL, 0)
+};
+
+const BitBoard
 MustPromoteMaskTable[kNumberOfColor] =
 {
   BitBoard(0x3FFFFULL, 0), BitBoard(0, 0x3FFFFULL)
@@ -133,6 +139,10 @@ BitBoard *
 RookAttacksTable[kBoardSquare];
 BitBoard *
 BishopAttacksTable[kBoardSquare];
+BitBoard
+RookStepAttacksTable[kBoardSquare];
+BitBoard
+BishopStepAttacksTable[kBoardSquare];
 BitBoard
 BlackLanceTable[2304];
 BitBoard 
@@ -229,7 +239,8 @@ set_gold_attacks(int rank, int file)
   GoldAttacksTable[kWhite][rank * kNumberOfFile + file] = b;
 }
 
-void set_king_attacks(int rank, int file)
+void
+set_king_attacks(int rank, int file)
 {
   BitBoard b;
   b.init();
@@ -244,7 +255,8 @@ void set_king_attacks(int rank, int file)
   KingAttacksTable[rank * kNumberOfFile + file] = b;
 }
 
-void set_knight_attacks(int rank, int file)
+void
+set_knight_attacks(int rank, int file)
 {
   BitBoard b;
   b.init();
@@ -256,6 +268,30 @@ void set_knight_attacks(int rank, int file)
   set_bit(b, rank + 2, file - 1);
   set_bit(b, rank + 2, file + 1);
   KnightAttacksTable[kWhite][rank * kNumberOfFile + file] = b;
+}
+
+void
+set_rook_step_attacks(int rank, int file)
+{
+  BitBoard b;
+  b.init();
+  set_bit(b, rank - 1, file);
+  set_bit(b, rank + 1, file);
+  set_bit(b, rank, file + 1);
+  set_bit(b, rank, file - 1);
+  RookStepAttacksTable[rank * kNumberOfFile + file] = b;
+}
+
+void
+set_bishop_step_attacks(int rank, int file)
+{
+  BitBoard b;
+  b.init();
+  set_bit(b, rank - 1, file - 1);
+  set_bit(b, rank - 1, file + 1);
+  set_bit(b, rank + 1, file - 1);
+  set_bit(b, rank + 1, file + 1);
+  BishopStepAttacksTable[rank * kNumberOfFile + file] = b;
 }
 
 void
@@ -558,6 +594,8 @@ initialize_attacks()
       set_king_attacks(rank, file);
       set_knight_attacks(rank, file);
       set_silver_attacks(rank, file);
+      set_bishop_step_attacks(rank, file);
+      set_rook_step_attacks(rank, file);
 
       set_lance_mask(rank, file);
       set_rook_mask(rank, file);

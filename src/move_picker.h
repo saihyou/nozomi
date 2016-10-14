@@ -38,37 +38,21 @@ class MovePicker
 public:
 
   MovePicker(const MovePicker &) = delete;
-  MovePicker(const Position &, Move, const HistoryStats &, Value);
-  MovePicker(const Position &, Move, Depth, const HistoryStats &, Square);
-  MovePicker
-  (
-    const Position &,
-    Move,
-    Depth,
-    const HistoryStats &,
-    const CounterMoveStats &,
-    const CounterMoveStats &,
-    Move,
-    SearchStack *
-  );
+  MovePicker &operator=(const MovePicker &) = delete;
 
-  MovePicker &
-  operator=(const MovePicker &) = delete;
+  MovePicker(const Position &, Move, Value);
+  MovePicker(const Position &, Move, Depth, Square);
+  MovePicker(const Position &, Move, Depth, SearchStack *);
 
-  Move
-  next_move();
+  Move next_move();
 
 private:
-  template<GenType> void
-  score();
-
-  void
-  generate_next_stage();
+  template<GenType> void score();
 
   ExtMove *
   begin()
   {
-    return moves_;
+    return cur_;
   }
 
   ExtMove *
@@ -78,22 +62,17 @@ private:
   }
 
   const Position         &pos_;
-  const HistoryStats     &history_;
-  const CounterMoveStats *counter_move_history_;
-  const CounterMoveStats *followup_move_history_;
-  SearchStack            *ss_;
+  const SearchStack      *ss_;
   Move                    countermove_;
   Depth                   depth_;
   Move                    tt_move_;
-  ExtMove                 killers_[3];
   Square                  recapture_square_;
-  Value                   capture_threshold_;
+  Value                   threshold_;
   int                     stage_;
-  ExtMove                *end_quiets_;
-  ExtMove                *end_bad_captures_ = moves_ + kMaxMoves - 1;
+  ExtMove                *end_bad_captures_;
+  ExtMove                *cur_;
+  ExtMove                *end_moves_;
   ExtMove                 moves_[kMaxMoves];
-  ExtMove                *cur_       = moves_;
-  ExtMove                *end_moves_ = moves_;
 };
 
 #endif

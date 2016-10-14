@@ -82,12 +82,55 @@ int FutilityMoveCounts[2][16]; // [improving][depth]
 // 探索深さをどのくらい減らすか
 Depth Reductions[2][2][64][64]; // [pv][improving][depth][move_number]
 
+int LMRMoveCounts[16];
+
 template <bool PvNode>
 inline Depth
 reduction(bool i, Depth d, int mn)
 {
   return Reductions[PvNode][i][std::min(int(d), 63)][std::min(mn, 63)];
 }
+
+struct EasyMoveManager
+{
+  void
+  clear()
+  {
+    stable_count = 0;
+    expected_position_key = 0;
+    pv[0] = pv[1] = pv[2] = kMoveNone;
+  }
+
+  Move
+  get(Key key) const
+  {
+    return expected_position_key == key ? pv[2] : kMoveNone;
+  }
+
+  void
+  update(Position &pos, const std::vector<Move> &new_pv)
+  {
+    assert(new_pv.size() >= 3);
+
+    stable_count = (new_pv[2] == pv[2]) ? stable_count + 1 : 0;
+
+    if (!std::equal(new_pv.begin(), new_pv.begin() + 3, pv))
+    {
+      std::copy(new_pv.begin(), new_pv.begin() + 3, pv);
+
+      StateInfo st[2];
+      pos.do_move(new_pv[0], st[0]);
+      pos.do_move(new_pv[1], st[1]);
+      expected_position_key = pos.key();
+      pos.undo_move(new_pv[1]);
+      pos.undo_move(new_pv[0]);
+    }
+  }
+
+  int stable_count;
+  Key expected_position_key;
+  Move pv[3];
+};
 
 // Lazy SMPで各slave threadの探索深さを決定するために使用するテーブル
 typedef std::vector<int> Row;
@@ -119,10 +162,8 @@ HalfDensity[] =
 
 const size_t HalfDensitySize = std::extent<decltype(HalfDensity)>::value;
 
-Value                   DrawValue[kNumberOfColor];
-#ifndef LEARN
-CounterMoveHistoryStats CounterMoveHistory;
-#endif
+EasyMoveManager EasyMove;
+Value DrawValue[kNumberOfColor];
 
 template <NodeType NT>
 Value 
@@ -134,10 +175,6 @@ search
   Value beta,
   Depth depth,
   bool cut_node
-#ifdef LEARN
-  ,
-  CounterMoveHistoryStats &CounterMoveHistory
-#endif
 );
 
 template <NodeType NT, bool InCheck>
@@ -160,10 +197,6 @@ update_stats
   Depth depth,
   Move *quiets,
   int quiets_count
-#ifdef LEARN
-  ,
-  CounterMoveHistoryStats &CounterMovesHistory
-#endif
 );
 
 void
@@ -205,19 +238,23 @@ Search::init()
     FutilityMoveCounts[0][depth] = int(2.4 + 0.773 * pow(depth + 0.00, 1.8));
     FutilityMoveCounts[1][depth] = int(2.9 + 1.045 * pow(depth + 0.49, 1.8));
   }
+
+  LMRMoveCounts[0] = 15;
+  for (int d = 1; d < 16; ++d)
+    LMRMoveCounts[d] = int(LMRMoveCounts[d - 1] + 2 * log(d));
 }
 
 void
 Search::clear()
 {
   TT.clear();
-#ifndef LEARN
-  CounterMoveHistory.clear();
-#endif
+
   for (Thread *th : Threads)
   {
     th->history_.clear();
     th->counter_moves_.clear();
+    th->from_to_.clear();
+    th->counter_move_history_.clear();
   }
 
   Threads.main()->previous_score = kValueInfinite;
@@ -240,34 +277,39 @@ MainThread::search()
       << USI::format_value(-kValueMate)
       << sync_endl;
     search_best_thread = false;
+    goto exit;
   }
-  else
+
+  if (root_pos_.is_decralation_win())
   {
-    if (Options["OwnBook"] && !Limits.infinite && !Limits.mate)
-    {
-      Move book_move = BookManager.get_move(root_pos_);
-      if (book_move != kMoveNone && std::count(root_moves_.begin(), root_moves_.end(), book_move))
-      {
-        std::swap(root_moves_[0], *std::find(root_moves_.begin(), root_moves_.end(), book_move));
-        search_best_thread = false;
-        goto exit;
-      }
-    }
-
-    for (Thread *th : Threads)
-    {
-      th->max_ply_ = 0;
-      th->root_depth_ = kDepthZero;
-      if (th != this)
-      {
-        th->root_pos_ = Position(root_pos_, th);
-        th->root_moves_ = root_moves_;
-        th->start_searching();
-      }
-    }
-
-    Thread::search();
+    sync_cout << "bestmove win" << sync_endl;
+    return;
   }
+
+  if (Options["OwnBook"] && !Limits.infinite && !Limits.mate)
+  {
+    Move book_move = BookManager.get_move(root_pos_);
+    if (book_move != kMoveNone && std::count(root_moves_.begin(), root_moves_.end(), book_move))
+    {
+      std::swap(root_moves_[0], *std::find(root_moves_.begin(), root_moves_.end(), book_move));
+      search_best_thread = false;
+      goto exit;
+    }
+  }
+
+  for (Thread *th : Threads)
+  {
+    th->max_ply_ = 0;
+    th->root_depth_ = kDepthZero;
+    if (th != this)
+    {
+      th->root_pos_ = Position(root_pos_, th);
+      th->root_moves_ = root_moves_;
+      th->start_searching();
+    }
+  }
+
+  Thread::search();
 
 exit:
   if (!Signals.stop && (Limits.ponder || Limits.infinite))
@@ -285,7 +327,7 @@ exit:
   }
 
   Thread *best_thread = this;
-  if (Options["MultiPV"] == 1 && search_best_thread)
+  if (Options["MultiPV"] == 1 && search_best_thread && !this->easy_move_played)
   {
     for (Thread *th : Threads)
     {
@@ -317,26 +359,29 @@ exit:
   }
 }
 
-#ifndef LEARN
 void
 Thread::search()
 {
-  SearchStack stack[kMaxPly + 4];
-  SearchStack *ss = stack + 2; // (ss - 2)から(ss + 2)までアクセス可能
+  SearchStack stack[kMaxPly + 7];
+  SearchStack *ss = stack + 5; // (ss - 5)から(ss + 2)までアクセス可能
   Value best_value = -kValueInfinite;
   Value alpha      = -kValueInfinite;
   Value beta       = kValueInfinite;
   Value delta      = -kValueInfinite;
+  Move easy_move   = kMoveNone;
   MainThread *main_thread = (this == Threads.main() ? Threads.main() : nullptr);
 
-  std::memset(ss - 2, 0, 5 * sizeof(SearchStack));
+  std::memset(ss - 5, 0, 8 * sizeof(SearchStack));
 
   completed_depth_ = kDepthZero;
 
   if (main_thread)
   {
-    main_thread->best_move_changes = 0;
+    easy_move = EasyMove.get(root_pos_.key());
+    EasyMove.clear();
+    main_thread->easy_move_played = false;
     main_thread->failed_low = false;
+    main_thread->best_move_changes = 0;
     TT.new_search();
   }
 
@@ -374,9 +419,6 @@ Thread::search()
         best_value = ::search<kPV>(root_pos_, ss, alpha, beta, root_depth_, false);
 
         std::stable_sort(root_moves_.begin() + pv_index_, root_moves_.end());
-
-        for (size_t i = 0; i <= pv_index_; ++i)
-          root_moves_[i].insert_pv_in_tt(root_pos_);
 
         if (Signals.stop)
           break;
@@ -450,36 +492,70 @@ Thread::search()
     )
       Signals.stop = true;
 
-    if (Limits.use_time_management() && !Signals.stop && !Signals.stop_on_ponder_hit)
+    if (Limits.use_time_management() && !Time.only_byoyomi())
     {
-      if (root_depth_ > 4 * kOnePly && multi_pv == 1)
-        Time.pv_instability(main_thread->best_move_changes);
-
-      if
-      (
-        root_moves_.size() == 1
-        ||
-        Time.elapsed() > Time.available_time()
-      )
+      if (!Signals.stop && !Signals.stop_on_ponder_hit)
       {
-        if (Limits.ponder)
-          Signals.stop_on_ponder_hit = true;
-        else
-          Signals.stop = true;
+        int failed_low = static_cast<int>(main_thread->failed_low);
+        int previous_score = static_cast<int>(best_value - main_thread->previous_score);
+        int improving_factor =
+          std::max
+          (
+            229,
+            std::min(715, 357 + 119 * failed_low - 6 * previous_score)
+          );
+        double unstable_pv_factor = 1 + main_thread->best_move_changes;
+        bool do_easy_move =
+          root_moves_[0].pv[0] == easy_move
+          &&
+          main_thread->best_move_changes < 0.03
+          &&
+          Time.elapsed() > Time.optimum() * 5 / 42;
+
+        if
+        (
+          root_moves_.size() == 1
+          ||
+          Time.elapsed() > Time.optimum() * unstable_pv_factor * improving_factor / 628
+          ||
+          (main_thread->easy_move_played = do_easy_move, do_easy_move)
+        )
+        {
+          if (Limits.ponder)
+            Signals.stop_on_ponder_hit = true;
+          else
+            Signals.stop = true;
+        }
       }
+
+      if (root_moves_[0].pv.size() >= 3)
+        EasyMove.update(root_pos_, root_moves_[0].pv);
+      else
+        EasyMove.clear();
     }
   }
+
+  if (!main_thread)
+    return;
+
+  if (EasyMove.stable_count < 6 || main_thread->easy_move_played)
+    EasyMove.clear();
 }
-#else
-void
-Thread::search(){}
 
 Value
-Search::search(Position &pos, SearchStack *ss, Value alpha, Value beta, Depth depth, CounterMoveHistoryStats &CounterMoveHistory)
+Search::search(Position &pos, SearchStack *ss, Value alpha, Value beta, Depth depth)
 {
-  return ::search<kPV>(pos, ss, alpha, beta, depth, false, CounterMoveHistory);
+  return ::search<kPV>(pos, ss, alpha, beta, depth, false);
 }
-#endif
+
+Value
+Search::qsearch(Position &pos, SearchStack *ss, Value alpha, Value beta)
+{
+  if (pos.in_check())
+    return ::qsearch<kPV, true>(pos, ss, alpha, beta, kDepthZero);
+  else
+    return ::qsearch<kPV, false>(pos, ss, alpha, beta, kDepthZero);
+}
 
 namespace
 {
@@ -494,10 +570,6 @@ search
   Value beta,
   Depth depth,
   bool cut_node
-#ifdef LEARN
-  ,
-  CounterMoveHistoryStats &CounterMoveHistory
-#endif
 )
 {
   const bool pv_node   = NT == kPV;
@@ -524,7 +596,6 @@ search
   Value tt_value;
   Value eval;
   Value null_value;
-  Value futility_value;
   bool in_check;
   bool gives_check;
   bool singular_extension_node;
@@ -532,6 +603,8 @@ search
   bool capture;
   bool do_full_depth_search;
   bool tt_hit;
+  bool move_count_pruning;
+  Piece moved_piece;
   int move_count;
   int quiet_count;
 
@@ -562,6 +635,10 @@ search
 
   if (!root_node)
   {
+    // 宣言勝ち
+    if (pos.is_decralation_win())
+      return mate_in(ss->ply - 1);
+
     // 探索の中断と千日手チェック
     Repetition repetition = ((ss - 1)->current_move != kMoveNull) ? pos.in_repetition() : kNoRepetition;
     if (Signals.stop.load(std::memory_order_relaxed) || repetition == kRepetition || ss->ply >= kMaxPly)
@@ -605,7 +682,8 @@ search
 
   assert(0 <= ss->ply && ss->ply < kMaxPly);
 
-  ss->current_move = (ss + 1)->excluded_move = best_move = kMoveNone;
+  ss->current_move  = (ss + 1)->excluded_move = best_move = kMoveNone;
+  ss->counter_moves = nullptr;
   (ss + 1)->skip_early_pruning = false;
   (ss + 2)->killers[0] = (ss + 2)->killers[1] = kMoveNone;
 
@@ -657,10 +735,6 @@ search
         depth,
         nullptr,
         0
-#ifdef LEARN
-        ,
-        CounterMoveHistory
-#endif
       );
 
     return tt_value;
@@ -721,12 +795,7 @@ search
   }
   else
   {
-    eval = ss->static_eval =
-      (ss - 1)->current_move != kMoveNull
-      ?
-      evaluate(pos, ss)
-      :
-      -(ss - 1)->static_eval + 2 * Eval::kTempo;
+    eval = ss->static_eval = evaluate(pos, ss);
     tte->save(position_key, kValueNone, kBoundNone, kDepthNone, kMoveNone, ss->static_eval, TT.generation());
   }
 
@@ -745,12 +814,7 @@ search
     tt_move == kMoveNone
   )
   {
-    if
-    (
-      depth <= kOnePly
-      &&
-      eval + razor_margin(3 * kOnePly) <= alpha
-    )
+    if (depth <= kOnePly)
       return qsearch<kNonPV, false>(pos, ss, alpha, beta, kDepthZero);
 
     Value ralpha = alpha - razor_margin(depth);
@@ -778,12 +842,13 @@ search
   (
     !pv_node
     &&
-    depth >= 2 * kOnePly
-    &&
     eval >= beta
+    &&
+    (ss->static_eval >= beta - 35 * (depth / kOnePly - 6) || depth >= 13 * kOnePly)
   )
   {
-    ss->current_move = kMoveNull;
+    ss->current_move  = kMoveNull;
+    ss->counter_moves = nullptr;
 
     assert(eval - beta >= 0);
 
@@ -806,10 +871,6 @@ search
         -beta + 1,
         depth - re,
         !cut_node
-#ifdef LEARN
-        ,
-        CounterMoveHistory
-#endif
       );
 
     (ss + 1)->skip_early_pruning = false;
@@ -820,7 +881,7 @@ search
       if (null_value >= kValueMateInMaxPly)
         null_value = beta;
 
-      if (depth < 12 * kOnePly && abs(beta) < kValueKnownWin)
+      if (abs(beta) < kValueKnownWin)
         return null_value;
 
       ss->skip_early_pruning = true;
@@ -837,10 +898,6 @@ search
           beta,
           depth - re,
           false
-#ifdef LEARN
-          ,
-          CounterMoveHistory
-#endif
         );
 
       ss->skip_early_pruning = false;
@@ -871,14 +928,15 @@ search
     // 成る手ならそれをくわえておいた方がちょっとだけいい感じのようだ
     if (move_is_promote((ss - 1)->current_move))
       v += static_cast<Value>(Eval::PromotePieceValueTable[move_piece_type((ss - 1)->current_move)]);
-    MovePicker mp(pos, tt_move, this_thread->history_, v);
+    MovePicker mp(pos, tt_move, v);
     CheckInfo ci(pos);
 
     while ((move = mp.next_move()) != kMoveNone)
     {
       if (pos.legal(move, ci.pinned))
       {
-        ss->current_move = move;
+        ss->current_move  = move;
+        ss->counter_moves = &this_thread->counter_move_history_[move_piece(move, pos.side_to_move())][move_to(move)];
         pos.do_move(move, st);
         (ss + 1)->evaluated = false;
         value = 
@@ -890,10 +948,6 @@ search
             -rbeta + 1,
             rdepth,
             !cut_node
-#ifdef LEARN
-            ,
-            CounterMoveHistory
-#endif
           );
         pos.undo_move(move);
         if (value >= rbeta)
@@ -913,7 +967,6 @@ search
   )
   {
     Depth d = depth - 2 * kOnePly - (pv_node ? kDepthZero : depth / 4);
-
     ss->skip_early_pruning = true;
     search<NT>
     (
@@ -922,11 +975,7 @@ search
       alpha,
       beta,
       d,
-      true
-#ifdef LEARN
-      ,
-      CounterMoveHistory
-#endif
+      cut_node
     );
     ss->skip_early_pruning = false;
 
@@ -935,16 +984,10 @@ search
   }
 
 moves_loop:
+  const CounterMoveStats *cmh = (ss - 1)->counter_moves;
+  const CounterMoveStats *fmh = (ss - 2)->counter_moves;
 
-  Square prev_move_square = move_to((ss - 1)->current_move);
-  Square prev_own_square  = move_to((ss - 2)->current_move);
-  Piece  prev_move_piece  = move_piece((ss - 1)->current_move, ~pos.side_to_move());
-  Piece  prev_own_piece   = move_piece((ss - 2)->current_move, pos.side_to_move());
-  Move   countermove      = this_thread->counter_moves_[prev_move_piece][prev_move_square];
-  const CounterMoveStats &cmh = CounterMoveHistory[prev_move_piece][prev_move_square];
-  const CounterMoveStats &fmh = CounterMoveHistory[prev_own_piece][prev_own_square];
-
-  MovePicker mp(pos, tt_move, depth, this_thread->history_, cmh, fmh, countermove, ss);
+  MovePicker mp(pos, tt_move, depth, ss);
   CheckInfo ci(pos);
   value = best_value;
   improving =
@@ -992,14 +1035,14 @@ moves_loop:
       continue;
 
     ss->move_count = ++move_count;
-
+#if 0
     if (root_node && this_thread == Threads.main() && Time.elapsed() > 3000)
     {
       sync_cout << "info depth " << depth
                 << " currmove " << USI::format_move(move)
                 << " currmovenumber " << move_count + this_thread->pv_index_ << sync_endl;
     }
-
+#endif
     if (pv_node)
       (ss + 1)->pv = nullptr;
 
@@ -1007,11 +1050,18 @@ moves_loop:
 
     // Stockfishだとpromotionも入っているが将棋としてはpromotionなんて普通の手なので除外
     capture = move_is_capture(move);
+    moved_piece = move_piece(move, pos.side_to_move());
 
     gives_check = pos.gives_check(move, ci);
+    move_count_pruning = (depth < 16 * kOnePly && move_count >= FutilityMoveCounts[improving][depth]);
 
     // Extend checks
-    if (gives_check && pos.see_sign(move) >= kValueZero)
+    if 
+    (
+      gives_check
+      &&
+      pos.see_sign(move) >= kValueZero
+    )
       ext = kOnePly;
 
     // Singular extension search
@@ -1038,10 +1088,6 @@ moves_loop:
           r_beta,
           depth / 2,
           cut_node
-#ifdef LEARN
-          ,
-          CounterMoveHistory
-#endif
         );
       ss->skip_early_pruning = false;
       ss->excluded_move = kMoveNone;
@@ -1067,33 +1113,28 @@ moves_loop:
     )
     {
       // Move count based pruning
-      if
-      (
-        depth < 16 * kOnePly
-        &&
-        move_count >= FutilityMoveCounts[improving][depth]
-      )
-        continue;
-
-      // History based pruning
-      if
-      (
-        depth <= 4 * kOnePly
-        &&
-        move != ss->killers[0]
-        &&
-        this_thread->history_[move_piece(move, pos.side_to_move())][move_to(move)] < kValueZero
-        &&
-        cmh[move_piece(move, pos.side_to_move())][move_to(move)] < kValueZero
-      )
+      if (move_count_pruning)
         continue;
 
       predicted_depth = std::max(new_depth - reduction<pv_node>(improving, depth, move_count), kDepthZero);
 
+      // Countermove based pruning
+      if
+      (
+        predicted_depth < 3 * kOnePly
+        &&
+        move != ss->killers[0]
+        &&
+        (!cmh || (*cmh)[moved_piece][move_to(move)] < kValueZero)
+        &&
+        (!fmh || (*fmh)[moved_piece][move_to(move)] < kValueZero)
+      )
+        continue;
+
       // Futility pruning: parent node
       if (predicted_depth < 7 * kOnePly)
       {
-        futility_value =
+        Value futility_value =
           ss->static_eval + futility_margin(predicted_depth) + 256;
 
         if (futility_value <= alpha)
@@ -1103,9 +1144,20 @@ moves_loop:
         }
       }
 
-      if (predicted_depth < 4 * kOnePly && pos.see_sign(move) < kValueZero)
-        continue;
+      if (predicted_depth < 8 * kOnePly)
+      {
+        Value see_v =
+          predicted_depth < 4 * kOnePly
+          ?
+          kValueZero
+          :
+          -Value(Eval::kPawnValue * 2 * int(predicted_depth - 3 * kOnePly));
+        if (pos.see_sign(move) < see_v)
+          continue;
+      }
     }
+
+    prefetch(TT.first_entry(pos.key_after(move)));
 
     if (!root_node && !pos.legal(move, ci.pinned))
     {
@@ -1113,7 +1165,8 @@ moves_loop:
       continue;
     }
 
-    ss->current_move = move;
+    ss->current_move  = move;
+    ss->counter_moves = &this_thread->counter_move_history_[moved_piece][move_to(move)];
 
     // Make the move
     pos.do_move(move, st, gives_check);
@@ -1126,32 +1179,35 @@ moves_loop:
       &&
       move_count > 1
       &&
-      !capture
+      (!capture || move_count > LMRMoveCounts[std::min(static_cast<int>(depth), 15)])
     )
     {
       Depth r = reduction<pv_node>(improving, depth, move_count);
-      Value h_value = this_thread->history_[move_piece(move, ~pos.side_to_move())][move_to(move)];
-      Value cmh_value = cmh[move_piece(move, ~pos.side_to_move())][move_to(move)];
 
-      if
-      (
-        (!pv_node && cut_node)
-        ||
-        (
-          is_ok((ss - 1)->current_move)
-          &&
-          h_value < kValueZero
-          &&
-          cmh_value <= kValueZero
-        )
-      )
-        r += kOnePly;
+      if (capture)
+      {
+        r -= r ? kOnePly : kDepthZero;
+      }
+      else
+      {
+        Value val =
+          this_thread->history_[moved_piece][move_to(move)]
+          +
+          (cmh ? (*cmh)[moved_piece][move_to(move)] : kValueZero)
+          +
+          (fmh ? (*fmh)[moved_piece][move_to(move)] : kValueZero)
+          +
+          this_thread->from_to_.get(~pos.side_to_move(), move);
 
-      int r_hist = (h_value + cmh_value) / 14980;
-      r = std::max(kDepthZero, r - r_hist * kOnePly);
+        // cut_nodeの場合はreductionを増やす
+        if (cut_node)
+          r += kOnePly;
+        else if (pos.see_reverse_move(move) < kValueZero)
+          r -= kOnePly;
 
-      if (r && pos.see_reverse_move(move) < kValueZero)
-        r = std::max(kDepthZero, r - kOnePly);
+        int r_hist = (val - 10000) / 20000;
+        r = std::max(kDepthZero, r - r_hist * kOnePly);
+      }
 
       Depth d = std::max(new_depth - r, kOnePly);
 
@@ -1164,13 +1220,9 @@ moves_loop:
           -alpha,
           d,
           true
-#ifdef LEARN
-          ,
-          CounterMoveHistory
-#endif
         );
 
-      do_full_depth_search = (value > alpha && r != kDepthZero);
+      do_full_depth_search = (value > alpha && d != kDepthZero);
     }
     else
     {
@@ -1199,10 +1251,6 @@ moves_loop:
           -alpha,
           new_depth,
           !cut_node
-#ifdef LEARN
-          ,
-          CounterMoveHistory
-#endif
         );
     }
 
@@ -1230,10 +1278,6 @@ moves_loop:
           -alpha,
           new_depth,
           false
-#ifdef LEARN
-          ,
-          CounterMoveHistory
-#endif
         );
     }
 
@@ -1315,10 +1359,6 @@ moves_loop:
       depth,
       quiets_searched,
       quiet_count
-#ifdef LEARN
-      ,
-      CounterMoveHistory
-#endif
     );
   }
   else if
@@ -1327,18 +1367,18 @@ moves_loop:
     &&
     !best_move
     &&
-    !in_check
-    &&
     !move_is_capture((ss - 1)->current_move)
     &&
     is_ok((ss - 1)->current_move)
-    &&
-    is_ok((ss - 2)->current_move)
   )
   {
+    Square prev_sq = move_to((ss - 1)->current_move);
+    Piece prev_piece = move_piece((ss - 1)->current_move, ~pos.side_to_move());
     Value bonus = Value((depth / kOnePly) * (depth / kOnePly) + depth / kOnePly - 1);
-    CounterMoveStats &prev_cmh = CounterMoveHistory[prev_own_piece][prev_own_square];
-    prev_cmh.update(prev_move_piece, prev_move_square, bonus);
+    if (is_ok((ss - 2)->current_move))
+      (ss - 2)->counter_moves->update(prev_piece, prev_sq, bonus);
+    if (is_ok((ss - 3)->current_move))
+      (ss - 3)->counter_moves->update(prev_piece, prev_sq, bonus);
   }
 
   tte->save
@@ -1517,12 +1557,7 @@ qsearch(Position &pos, SearchStack *ss, Value alpha, Value beta, Depth depth)
     }
     else
     {
-      ss->static_eval = best_value =
-        (ss - 1)->current_move != kMoveNull
-        ?
-        evaluate(pos, ss)
-        :
-        -(ss - 1)->static_eval + 2 * Eval::kTempo;
+      ss->static_eval = best_value = evaluate(pos, ss);
     }
 
     if (best_value >= beta)
@@ -1550,7 +1585,7 @@ qsearch(Position &pos, SearchStack *ss, Value alpha, Value beta, Depth depth)
     futility_base = best_value + 128;
   }
 
-  MovePicker mp(pos, tt_move, depth, pos.this_thread()->history_, move_to((ss - 1)->current_move));
+  MovePicker mp(pos, tt_move, depth, move_to((ss - 1)->current_move));
   CheckInfo ci(pos);
 
   while ((move = mp.next_move()) != kMoveNone)
@@ -1600,6 +1635,8 @@ qsearch(Position &pos, SearchStack *ss, Value alpha, Value beta, Depth depth)
       pos.see_sign(move) < kValueZero
     )
       continue;
+
+    prefetch(TT.first_entry(pos.key_after(move)));
 
     if (!pos.legal(move, ci.pinned))
       continue;
@@ -1736,10 +1773,6 @@ update_stats
   Depth depth,
   Move *quiets,
   int quiets_count
-#ifdef LEARN
-  ,
-  CounterMoveHistoryStats &CounterMoveHistory
-#endif
 ) 
 {
   if (ss->killers[0] != move)
@@ -1748,51 +1781,48 @@ update_stats
     ss->killers[0] = move;
   }
 
-  Value  bonus       = Value((depth / kOnePly) * (depth / kOnePly) + depth / kOnePly - 1);
-  Square prev_square = move_to((ss - 1)->current_move);
-  Square prev_own_square = move_to((ss - 2)->current_move);
-  Piece  prev_piece  = move_piece((ss - 1)->current_move, ~pos.side_to_move());
-  Piece  prev_own_piece = move_piece((ss - 2)->current_move, pos.side_to_move());
-  CounterMoveStats &cmh = CounterMoveHistory[prev_piece][prev_square];
-  CounterMoveStats &fmh = CounterMoveHistory[prev_own_piece][prev_own_square];
+  Color c = pos.side_to_move();
+  Value bonus = Value((depth / kOnePly) * (depth / kOnePly) + 2 * depth / kOnePly - 2);
+  Piece moved_piece = move_piece(move, pos.side_to_move());
+
+  Square prev_sq = move_to((ss - 1)->current_move);
+  Piece prev_piece = move_piece((ss - 1)->current_move, ~pos.side_to_move());
+  CounterMoveStats *cmh = (ss - 1)->counter_moves;
+  CounterMoveStats *fmh = (ss - 2)->counter_moves;
   Thread *this_thread = pos.this_thread();
 
-  this_thread->history_.update(move_piece(move, pos.side_to_move()), move_to(move), bonus);
+  this_thread->history_.update(moved_piece, move_to(move), bonus);
+  this_thread->from_to_.update(c, move, bonus);
 
-  if (is_ok((ss - 1)->current_move))
+  if (cmh)
   {
-    this_thread->counter_moves_.update(prev_piece, prev_square, move);
-    cmh.update(move_piece(move, pos.side_to_move()), move_to(move), bonus);
+    this_thread->counter_moves_.update(prev_piece, prev_sq, move);
+    cmh->update(moved_piece, move_to(move), bonus);
   }
 
-  if (is_ok((ss - 2)->current_move))
-    fmh.update(move_piece(move, pos.side_to_move()), move_to(move), bonus);
+  if (fmh)
+    fmh->update(moved_piece, move_to(move), bonus);
 
   for (int i = 0; i < quiets_count; ++i)
   {
     Move m = quiets[i];
     this_thread->history_.update(move_piece(m, pos.side_to_move()), move_to(m), -bonus);
+    this_thread->from_to_.update(c, m, -bonus);
 
-    if (is_ok((ss - 1)->current_move))
-      cmh.update(move_piece(m, pos.side_to_move()), move_to(m), -bonus);
+    if (cmh)
+      cmh->update(move_piece(m, pos.side_to_move()), move_to(m), -bonus);
 
-    if (is_ok((ss - 2)->current_move))
-      fmh.update(move_piece(m, pos.side_to_move()), move_to(m), -bonus);
+    if (fmh)
+      fmh->update(move_piece(m, pos.side_to_move()), move_to(m), -bonus);
   }
 
-  if
-  (
-    is_ok((ss - 2)->current_move)
-    &&
-    (ss - 1)->move_count == 1
-    &&
-    move_capture((ss - 1)->current_move) == kPieceNone
-  )
+  if ((ss - 1)->move_count == 1 && !move_is_capture((ss - 1)->current_move))
   {
-    Square prev_prev_square = move_to((ss - 2)->current_move);
-    Piece  prev_prev_piece  = move_piece((ss - 2)->current_move, pos.side_to_move());
-    CounterMoveStats &prev_cmh = CounterMoveHistory[prev_prev_piece][prev_prev_square];
-    prev_cmh.update(prev_piece, prev_square, -bonus - 2 * (depth + 1) / kOnePly);
+    if ((ss - 2)->counter_moves)
+      (ss - 2)->counter_moves->update(prev_piece, prev_sq, -bonus - 2 * (depth + 1) / kOnePly - 1);
+
+    if ((ss - 3)->counter_moves)
+      (ss - 3)->counter_moves->update(prev_piece, prev_sq, -bonus - 2 * (depth + 1) / kOnePly - 1);
   }
 }
 
@@ -1875,31 +1905,6 @@ usi_pv(const Position &pos, Depth depth, Value alpha, Value beta)
   }
 
   return ss.str();
-}
-
-void
-RootMove::insert_pv_in_tt(Position& pos)
-{
-  StateInfo state[kMaxPly];
-  StateInfo *st = state;
-  TTEntry *tte;
-  bool tt_hit;
-
-  size_t idx;
-  for (idx = 0; idx < pv.size(); ++idx)
-  {
-    tte = TT.probe(pos.key(), &tt_hit);
-
-    if (!tt_hit || tte->move(pos) != pv[idx])
-      tte->save(pos.key(), kValueNone, kBoundNone, kDepthNone, pv[idx], kValueNone, TT.generation());
-
-    assert(MoveList<kLegal>(pos).contains(pv[idx]));
-
-    pos.do_move(pv[idx], *st++);
-  }
-
-  while (idx)
-    pos.undo_move(pv[--idx]);
 }
 
 bool

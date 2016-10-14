@@ -116,8 +116,7 @@ generate_pawn_check(const Position &pos, const BitBoard &movable, const CheckInf
     }
   }
 
-  BitBoard not_promotable = target;
-  not_promotable.not_and(PromotableMaskTable[color]);
+  BitBoard not_promotable = target & NotPromotableMaskTable[color];
   while (not_promotable.test())
   {
     const Square to = not_promotable.pop_bit();
@@ -1490,11 +1489,36 @@ can_king_escape(const Position &pos, Square sq, const BitBoard &check_attack, Co
   return false;
 }
 
+/// 玉が動くことで王手を回避できるか
+///
+/// @param pos          Positionクラス
+/// @param sq           王手をかけた駒の位置
+/// @param check_attack 王手をかけた駒の利き
+/// @param color        王手をかけられている側
+/// @param occupied     occupied bitboard
 bool
-can_king_escape(const Position &pos, Color color)
+can_king_escape(const Position &pos, Square sq, const BitBoard &check_attack, Color color, const BitBoard &occupied)
 {
   BitBoard king_movable = ~pos.pieces(kOccupied, color) & KingAttacksTable[pos.square_king(color)];
-  const BitBoard occupied = pos.occupied();
+  // 王手をかけた駒の利きがある場所にはいけない
+  king_movable.not_and(check_attack);
+  // 王手をかけた駒の場所にも行けない
+  king_movable = king_movable ^ MaskTable[sq];
+  while (king_movable.test())
+  {
+    const Square to = king_movable.pop_bit();
+    if (!pos.is_attacked(to, color, occupied))
+      return true;
+  }
+
+  return false;
+}
+
+
+bool
+can_king_escape(const Position &pos, Color color, const BitBoard &occupied)
+{
+  BitBoard king_movable = ~pos.pieces(kOccupied, color) & KingAttacksTable[pos.square_king(color)];
 
   while (king_movable.test())
   {
@@ -1506,10 +1530,10 @@ can_king_escape(const Position &pos, Color color)
   return false;
 }
 
+
 bool
-can_piece_capture(const Position &pos, Square sq, const BitBoard &pinned, Color color)
+can_piece_capture(const Position &pos, Square sq, const BitBoard &pinned, Color color, const BitBoard &occupied)
 {
-  const BitBoard occupied = pos.occupied();
   BitBoard attack = pos.pieces(kPawn, color) & PawnAttacksTable[~color][sq];
   attack.and_or(pos.pieces(kKnight, color), KnightAttacksTable[~color][sq]);
   attack.and_or(pos.pieces(kSilver, color), SilverAttacksTable[~color][sq]);
@@ -1530,9 +1554,8 @@ can_piece_capture(const Position &pos, Square sq, const BitBoard &pinned, Color 
 }
 
 bool
-can_piece_capture(const Position &pos, Square sq, Color color)
+can_piece_capture(const Position &pos, Square sq, Color color, const BitBoard &occupied)
 {
-  const BitBoard occupied = pos.occupied();
   BitBoard attack = pos.pieces(kPawn, color) & PawnAttacksTable[~color][sq];
   attack.and_or(pos.pieces(kKnight, color), KnightAttacksTable[~color][sq]);
   attack.and_or(pos.pieces(kSilver, color), SilverAttacksTable[~color][sq]);
@@ -1542,7 +1565,7 @@ can_piece_capture(const Position &pos, Square sq, Color color)
   attack.and_or(pos.rook_dragon(color), rook_attack(occupied, sq));
   attack.and_or(pos.pieces(kLance, color), lance_attack(occupied, ~color, sq));
 
-  const BitBoard pinned = pos.pinned_pieces(color);
+  const BitBoard pinned = pos.pinned_pieces(color, occupied);
   while (attack.test())
   {
     const Square from = attack.pop_bit();
@@ -1561,7 +1584,6 @@ search_drop_mate(Position &pos, const BitBoard &bb)
   BitBoard dest;
   Square sq;
   bool result;
-  Move move;
   const Square enemy = pos.square_king(~color);
   BitBoard occupied = pos.occupied();
   const Hand hand = pos.hand(color);
@@ -1570,25 +1592,22 @@ search_drop_mate(Position &pos, const BitBoard &bb)
   if (has_hand(hand, kRook))
   {
     // 隣接王手だけ考える
-    // 金の利きでandをとれば、十字の利きだけ取り出せる
-    dest = bb & (GoldAttacksTable[kBlack][enemy] & GoldAttacksTable[kWhite][enemy]);
+    dest = bb & RookStepAttacksTable[enemy];
     while (dest.test())
     {
       sq = dest.pop_bit();
       // sqの場所に自駒の利きがなければ敵の王にとられる
       if (pos.is_attacked(sq, ~color, occupied))
       {
-        move = move_init(sq, kRook);
-        pos.do_temporary_move(move);
+        BitBoard new_occupied = occupied ^ MaskTable[sq];
         result =
           (
-            can_king_escape(pos, sq, RookAttacksTable[sq][0], ~color)
+            can_king_escape(pos, sq, RookAttacksTable[sq][0], ~color, new_occupied)
             ||
-            can_piece_capture(pos, sq, pinned, ~color)
+            can_piece_capture(pos, sq, pinned, ~color, new_occupied)
           );
-        pos.undo_temporary_move(move);
         if (!result)
-          return move;
+          return move_init(sq, kRook);
       }
     }
   }
@@ -1610,40 +1629,36 @@ search_drop_mate(Position &pos, const BitBoard &bb)
         pos.is_attacked(sq, ~color, occupied)
       )
       {
-        move = move_init(sq, kLance);
-        pos.do_temporary_move(move);
+        BitBoard new_occupied = occupied ^ MaskTable[sq];
         result =
           (
-            can_king_escape(pos, sq, LanceAttacksTable[color][sq][0], ~color)
+            can_king_escape(pos, sq, LanceAttacksTable[color][sq][0], ~color, new_occupied)
             ||
-            can_piece_capture(pos, sq, pinned, ~color)
+            can_piece_capture(pos, sq, pinned, ~color, new_occupied)
           );
-        pos.undo_temporary_move(move);
         if (!result)
-          return move;
+          return move_init(sq, kLance);
       }
     }
   }
 
   if (has_hand(hand, kBishop))
   {
-    dest = bb & (SilverAttacksTable[kBlack][enemy] & SilverAttacksTable[kWhite][enemy]);
+    dest = bb & BishopStepAttacksTable[enemy];
     while (dest.test())
     {
       sq = dest.pop_bit();
       if (pos.is_attacked(sq, ~color, occupied))
       {
-        move = move_init(sq, kBishop);
-        pos.do_temporary_move(move);
+        BitBoard new_occupied = occupied ^ MaskTable[sq];
         result =
           (
-            can_king_escape(pos, sq, BishopAttacksTable[sq][0], ~color)
+            can_king_escape(pos, sq, BishopAttacksTable[sq][0], ~color, new_occupied)
             ||
-            can_piece_capture(pos, sq, pinned, ~color)
+            can_piece_capture(pos, sq, pinned, ~color, new_occupied)
           );
-        pos.undo_temporary_move(move);
         if (!result)
-          return move;
+          return move_init(sq, kBishop);
       }
     }
   }
@@ -1661,17 +1676,15 @@ search_drop_mate(Position &pos, const BitBoard &bb)
       sq = dest.pop_bit();
       if (pos.is_attacked(sq, ~color, occupied))
       {
-        move = move_init(sq, kGold);
-        pos.do_temporary_move(move);
+        BitBoard new_occupied = occupied ^ MaskTable[sq];
         result =
           (
-            can_king_escape(pos, sq, GoldAttacksTable[color][sq], ~color)
+            can_king_escape(pos, sq, GoldAttacksTable[color][sq], ~color, new_occupied)
             ||
-            can_piece_capture(pos, sq, pinned, ~color)
+            can_piece_capture(pos, sq, pinned, ~color, new_occupied)
           );
-        pos.undo_temporary_move(move);
         if (!result)
-          return move;
+          return move_init(sq, kGold);
       }
     }
   }
@@ -1705,17 +1718,15 @@ search_drop_mate(Position &pos, const BitBoard &bb)
       sq = dest.pop_bit();
       if (pos.is_attacked(sq, ~color, occupied))
       {
-        move = move_init(sq, kSilver);
-        pos.do_temporary_move(move);
+        BitBoard new_occupied = occupied ^ MaskTable[sq];
         result =
           (
-            can_king_escape(pos, sq, SilverAttacksTable[color][sq], ~color)
+            can_king_escape(pos, sq, SilverAttacksTable[color][sq], ~color, new_occupied)
             ||
-            can_piece_capture(pos, sq, pinned, ~color)
+            can_piece_capture(pos, sq, pinned, ~color, new_occupied)
           );
-        pos.undo_temporary_move(move);
         if (!result)
-          return move;
+          return move_init(sq, kSilver);
       }
     }
   }
@@ -1735,12 +1746,10 @@ silver_end:
         (color == kWhite && sq < k9H)
       )
       {
-        move = move_init(sq, kKnight);
-        pos.do_temporary_move(move);
-        result = (can_king_escape(pos, ~color) || can_piece_capture(pos, sq, pinned, ~color));
-        pos.undo_temporary_move(move);
+        BitBoard new_occupied = occupied ^ MaskTable[sq];
+        result = (can_king_escape(pos, ~color, new_occupied) || can_piece_capture(pos, sq, pinned, ~color, new_occupied));
         if (!result)
-          return move;
+          return move_init(sq, kKnight);
       }
     }
   }
@@ -1755,7 +1764,6 @@ search_pawn_mate(Position &pos, const BitBoard &movable, const CheckInfo &ci)
   BitBoard piece = pos.pieces(kPawn, color);
   BitBoard dest = movable & pawn_attack(color, piece);
   bool result = true;
-  Move move;
 
   BitBoard enemy_field = dest & PromotableMaskTable[color];
   while (enemy_field.test())
@@ -1769,8 +1777,7 @@ search_pawn_mate(Position &pos, const BitBoard &movable, const CheckInfo &ci)
       !pos.is_king_discover(from, to, color, ci.pinned)
     )
     {
-      move = move_init(from, to, kPawn, pos.piece_type(to), true);
-      pos.do_temporary_move(move);
+      pos.move_with_promotion_temporary(from, to, kPawn, pos.piece_type(to));
       if (pos.is_attacked(to, ~color, pos.occupied()))
       {
         const BitBoard pinned = pos.pinned_pieces(~color);
@@ -1778,16 +1785,16 @@ search_pawn_mate(Position &pos, const BitBoard &movable, const CheckInfo &ci)
           (
             can_king_escape(pos, to, GoldAttacksTable[color][to], ~color)
             ||
-            can_piece_capture(pos, to, pinned, ~color)
+            can_piece_capture(pos, to, pinned, ~color, pos.occupied())
           );
       }
-      pos.undo_temporary_move(move);
+      pos.move_with_promotion_temporary(from, to, kPawn, pos.piece_type(to));
       if (!result)
-        return move;
+        return move_init(from, to, kPawn, pos.piece_type(to), true);
     }
   }
 
-  dest.not_and(PromotableMaskTable[color]);
+  dest = dest & NotPromotableMaskTable[color];
   while (dest.test())
   {
     const Square to   = dest.pop_bit();
@@ -1799,8 +1806,7 @@ search_pawn_mate(Position &pos, const BitBoard &movable, const CheckInfo &ci)
       !pos.is_king_discover(from, to, color, ci.pinned)
     )
     {
-      move = move_init(from, to, kPawn, pos.piece_type(to), false);
-      pos.do_temporary_move(move);
+      pos.move_temporary(from, to, kPawn, pos.piece_type(to));
       if (pos.is_attacked(to, ~color, pos.occupied()))
       {
         const BitBoard pinned = pos.pinned_pieces(~color);
@@ -1808,12 +1814,12 @@ search_pawn_mate(Position &pos, const BitBoard &movable, const CheckInfo &ci)
           (
             can_king_escape(pos, to, PawnAttacksTable[color][to], ~color)
             ||
-            can_piece_capture(pos, to, pinned, ~color)
+            can_piece_capture(pos, to, pinned, ~color, pos.occupied())
           );
       }
-      pos.undo_temporary_move(move);
+      pos.move_temporary(from, to, kPawn, pos.piece_type(to));
       if (!result)
-        return move;
+        return move_init(from, to, kPawn, pos.piece_type(to), false);
     }
   }
   return kMoveNone;
@@ -1824,7 +1830,6 @@ search_lance_mate(Position &pos, const BitBoard &movable, const CheckInfo &ci)
 {
   Color color = pos.side_to_move();
   BitBoard piece = pos.pieces(kLance, color);
-  Move move;
   bool result = true;
 
   while (piece.test())
@@ -1840,20 +1845,19 @@ search_lance_mate(Position &pos, const BitBoard &movable, const CheckInfo &ci)
       if (pos.is_king_discover(from, to, color, ci.pinned))
         continue;
 
-      move = move_init(from, to, kLance, capture, true);
-      pos.do_temporary_move(move);
+      pos.move_with_promotion_temporary(from, to, kLance, capture);
       if (pos.is_attacked(to, ~color, pos.occupied()))
       {
         result =
           (
             can_king_escape(pos, to, GoldAttacksTable[color][to], ~color)
             ||
-            can_piece_capture(pos, to, ~color)
+            can_piece_capture(pos, to, ~color, pos.occupied())
           );
       }
-      pos.undo_temporary_move(move);
+      pos.move_with_promotion_temporary(from, to, kLance, capture);
       if (!result)
-        return move;
+        return move_init(from, to, kLance, capture, true);
     }
 
     const BitBoard rank3mask = (color == kBlack) ? BitBoard(0x7FC0000ULL, 0) : BitBoard(0x7FC0000000000000ULL, 0);
@@ -1866,23 +1870,22 @@ search_lance_mate(Position &pos, const BitBoard &movable, const CheckInfo &ci)
       if (pos.is_king_discover(from, to, color, ci.pinned))
         continue;
 
-      move = move_init(from, to, kLance, capture, false);
-      pos.do_temporary_move(move);
+      pos.move_temporary(from, to, kLance, capture);
       if (pos.is_attacked(to, ~color, pos.occupied()))
       {
         result =
           (
             can_king_escape(pos, to, LanceAttacksTable[color][to][0], ~color)
             ||
-            can_piece_capture(pos, to, ~color)
+            can_piece_capture(pos, to, ~color, pos.occupied())
           );
       }
-      pos.undo_temporary_move(move);
+      pos.move_temporary(from, to, kLance, capture);
       if (!result)
-        return move;
+        return move_init(from, to, kLance, capture, false);
     }
 
-    dest.not_and(PromotableMaskTable[color]);
+    dest = dest & NotPromotableMaskTable[color];
     attack = dest & PawnAttacksTable[~color][pos.square_king(~color)];
     if (attack.test())
     {
@@ -1892,21 +1895,19 @@ search_lance_mate(Position &pos, const BitBoard &movable, const CheckInfo &ci)
       if (pos.is_king_discover(from, to, color, ci.pinned))
         continue;
 
-      move = move_init(from, to, kLance, capture, false);
-      pos.do_temporary_move(move);
+      pos.move_temporary(from, to, kLance, capture);
       if (pos.is_attacked(to, ~color, pos.occupied()))
       {
         result =
           (
             can_king_escape(pos, to, LanceAttacksTable[color][to][0], ~color)
             ||
-            can_piece_capture(pos, to, ~color)
+            can_piece_capture(pos, to, ~color, pos.occupied())
           );
       }
-
-      pos.undo_temporary_move(move);
+      pos.move_temporary(from, to, kLance, capture);
       if (!result)
-        return move;
+        return move_init(from, to, kLance, capture, false);
     }
   }
   return kMoveNone;
@@ -1917,7 +1918,6 @@ search_knight_mate(Position &pos, const BitBoard &movable, const CheckInfo &ci)
 {
   Color color = pos.side_to_move();
   BitBoard piece = pos.pieces(kKnight, color);
-  Move move;
   bool result = true;
 
   while (piece.test())
@@ -1933,12 +1933,11 @@ search_knight_mate(Position &pos, const BitBoard &movable, const CheckInfo &ci)
       if (pos.is_king_discover(from, to, color, ci.pinned))
         continue;
 
-      move = move_init(from, to, kKnight, capture, false);
-      pos.do_temporary_move(move);
-      result = (can_king_escape(pos, ~color) || can_piece_capture(pos, to, ~color));
-      pos.undo_temporary_move(move);
+      pos.move_temporary(from, to, kKnight, capture);
+      result = (can_king_escape(pos, ~color, pos.occupied()) || can_piece_capture(pos, to, ~color, pos.occupied()));
+      pos.move_temporary(from, to, kKnight, capture);
       if (!result)
-        return move;
+        return move_init(from, to, kKnight, capture, false);
     }
 
     attack = (dest & PromotableMaskTable[color]) & GoldAttacksTable[~color][pos.square_king(~color)];
@@ -1950,20 +1949,19 @@ search_knight_mate(Position &pos, const BitBoard &movable, const CheckInfo &ci)
       if (pos.is_king_discover(from, to, color, ci.pinned))
         continue;
 
-      move = move_init(from, to, kKnight, capture, true);
-      pos.do_temporary_move(move);
+      pos.move_with_promotion_temporary(from, to, kKnight, capture);
       if (pos.is_attacked(to, ~color, pos.occupied()))
       {
         result =
           (
             can_king_escape(pos, to, GoldAttacksTable[color][to], ~color)
             ||
-            can_piece_capture(pos, to, ~color)
+            can_piece_capture(pos, to, ~color, pos.occupied())
           );
       }
-      pos.undo_temporary_move(move);
+      pos.move_with_promotion_temporary(from, to, kKnight, capture);
       if (!result)
-        return move;
+        return move_init(from, to, kKnight, capture, true);
     }
   }
   return kMoveNone;
@@ -1974,7 +1972,6 @@ search_silver_mate(Position &pos, const BitBoard &movable, const CheckInfo &ci)
 {
   Color color = pos.side_to_move();
   BitBoard piece = pos.pieces(kSilver, color);
-  Move move;
   bool result = true;
 
   // fromが敵陣で成ることができる場合
@@ -1992,20 +1989,23 @@ search_silver_mate(Position &pos, const BitBoard &movable, const CheckInfo &ci)
       if (pos.is_king_discover(from, to, color, ci.pinned))
         continue;
 
-      move = move_init(from, to, kSilver, capture, false);
-      pos.do_temporary_move(move);
+      pos.move_temporary(from, to, kSilver, capture);
       if (pos.is_attacked(to, ~color, pos.occupied()))
       {
-        result =
-          (
-            can_king_escape(pos, to, SilverAttacksTable[color][to], ~color)
-            ||
-            can_piece_capture(pos, to, ~color)
-          );
+        result = true;
+        if (!can_piece_capture(pos, to, ~color, pos.occupied()))
+        {
+          if (!can_king_escape(pos, to, SilverAttacksTable[color][to], ~color))
+            result = false;
+        }
+        else
+        {
+          dest = dest ^ MaskTable[to];
+        }
       }
-      pos.undo_temporary_move(move);
+      pos.move_temporary(from, to, kSilver, capture);
       if (!result)
-        return move;
+        return move_init(from, to, kSilver, capture, false);
     }
 
     attack = dest & GoldAttacksTable[~color][pos.square_king(~color)];
@@ -2017,24 +2017,23 @@ search_silver_mate(Position &pos, const BitBoard &movable, const CheckInfo &ci)
       if (pos.is_king_discover(from, to, color, ci.pinned))
         continue;
 
-      move = move_init(from, to, kSilver, capture, true);
-      pos.do_temporary_move(move);
+      pos.move_with_promotion_temporary(from, to, kSilver, capture);
       if (pos.is_attacked(to, ~color, pos.occupied()))
       {
         result =
           (
             can_king_escape(pos, to, GoldAttacksTable[color][to], ~color)
             ||
-            can_piece_capture(pos, to, ~color)
+            can_piece_capture(pos, to, ~color, pos.occupied())
           );
       }
-      pos.undo_temporary_move(move);
+      pos.move_with_promotion_temporary(from, to, kSilver, capture);
       if (!result)
-        return move;
+        return move_init(from, to, kSilver, capture, true);
     }
   }
 
-  piece.not_and(PromotableMaskTable[color]);
+  piece = piece & NotPromotableMaskTable[color];
   while (piece.test())
   {
     // toが敵陣で成ることができる
@@ -2050,20 +2049,23 @@ search_silver_mate(Position &pos, const BitBoard &movable, const CheckInfo &ci)
       if (pos.is_king_discover(from, to, color, ci.pinned))
         continue;
 
-      move = move_init(from, to, kSilver, capture, false);
-      pos.do_temporary_move(move);
+      pos.move_temporary(from, to, kSilver, capture);
       if (pos.is_attacked(to, ~color, pos.occupied()))
       {
-        result =
-          (
-            can_king_escape(pos, to, SilverAttacksTable[color][to], ~color)
-            ||
-            can_piece_capture(pos, to, ~color)
-          );
+        result = true;
+        if (!can_piece_capture(pos, to, ~color, pos.occupied()))
+        {
+          if (!can_king_escape(pos, to, SilverAttacksTable[color][to], ~color))
+            result = false;
+        }
+        else
+        {
+          dest = dest ^ MaskTable[to];
+        }
       }
-      pos.undo_temporary_move(move);
+      pos.move_temporary(from, to, kSilver, capture);
       if (!result)
-        return move;
+        return move_init(from, to, kSilver, capture, false);
     }
 
     attack = dest & GoldAttacksTable[~color][pos.square_king(~color)];
@@ -2075,25 +2077,23 @@ search_silver_mate(Position &pos, const BitBoard &movable, const CheckInfo &ci)
       if (pos.is_king_discover(from, to, color, ci.pinned))
         continue;
 
-      move = move_init(from, to, kSilver, capture, true);
-      pos.do_temporary_move(move);
+      pos.move_with_promotion_temporary(from, to, kSilver, capture);
       if (pos.is_attacked(to, ~color, pos.occupied()))
       {
         result =
           (
             can_king_escape(pos, to, GoldAttacksTable[color][to], ~color)
             ||
-            can_piece_capture(pos, to, ~color)
+            can_piece_capture(pos, to, ~color, pos.occupied())
           );
       }
-      pos.undo_temporary_move(move);
+      pos.move_with_promotion_temporary(from, to, kSilver, capture);
       if (!result)
-        return move;
+        return move_init(from, to, kSilver, capture, true);
     }
 
     // fromもtoも敵陣になく成ることができない
-    BitBoard not_promotable = movable;
-    not_promotable.not_and(PromotableMaskTable[color]);
+    BitBoard not_promotable = movable & NotPromotableMaskTable[color];
     BitBoard not_promote_dest = not_promotable & SilverAttacksTable[color][from];
     BitBoard not_promote_attack = not_promote_dest & SilverAttacksTable[~color][pos.square_king(~color)];
     while (not_promote_attack.test())
@@ -2104,20 +2104,19 @@ search_silver_mate(Position &pos, const BitBoard &movable, const CheckInfo &ci)
       if (pos.is_king_discover(from, to, color, ci.pinned))
         continue;
 
-      move = move_init(from, to, kSilver, capture, false);
-      pos.do_temporary_move(move);
+      pos.move_temporary(from, to, kSilver, capture);
       if (pos.is_attacked(to, ~color, pos.occupied()))
       {
         result =
           (
             can_king_escape(pos, to, SilverAttacksTable[color][to], ~color)
             ||
-            can_piece_capture(pos, to, ~color)
+            can_piece_capture(pos, to, ~color, pos.occupied())
           );
       }
-      pos.undo_temporary_move(move);
+      pos.move_temporary(from, to, kSilver, capture);
       if (!result)
-        return move;
+        return move_init(from, to, kSilver, capture, false);
     }
   }
 
@@ -2129,7 +2128,6 @@ search_total_gold_mate(Position &pos, const BitBoard &movable, const CheckInfo &
 {
   Color color = pos.side_to_move();
   BitBoard piece = pos.total_gold(color);
-  Move move;
   bool result = true;
 
   while (piece.test())
@@ -2147,20 +2145,19 @@ search_total_gold_mate(Position &pos, const BitBoard &movable, const CheckInfo &
       if (pos.is_king_discover(from, to, color, ci.pinned))
         continue;
 
-      move = move_init(from, to, place, capture, false);
-      pos.do_temporary_move(move);
+      pos.move_temporary(from, to, place, capture);
       if (pos.is_attacked(to, ~color, pos.occupied()))
       {
         result =
           (
             can_king_escape(pos, to, GoldAttacksTable[color][to], ~color)
             ||
-            can_piece_capture(pos, to, ~color)
+            can_piece_capture(pos, to, ~color, pos.occupied())
           );
       }
-      pos.undo_temporary_move(move);
+      pos.move_temporary(from, to, place, capture);
       if (!result)
-        return move;
+        return move_init(from, to, place, capture, false);
     }
   }
   return kMoveNone;
@@ -2171,7 +2168,6 @@ search_bishop_mate(Position &pos, const BitBoard &movable, const BitBoard &occup
 {
   Color color = pos.side_to_move();
   BitBoard piece = pos.pieces(kBishop, color);
-  Move move;
   bool result = true;
 
   // fromが敵陣で成ることができる場合
@@ -2188,25 +2184,24 @@ search_bishop_mate(Position &pos, const BitBoard &movable, const BitBoard &occup
       if (pos.is_king_discover(from, to, color, ci.pinned))
         continue;
 
-      move = move_init(from, to, kBishop, capture, true);
-      pos.do_temporary_move(move);
+      pos.move_with_promotion_temporary(from, to, kBishop, capture);
       if (pos.is_attacked(to, ~color, pos.occupied()))
       {
         result =
           (
             can_king_escape(pos, to, BishopAttacksTable[to][0] | KingAttacksTable[to], ~color)
             ||
-            can_piece_capture(pos, to, ~color)
+            can_piece_capture(pos, to, ~color, pos.occupied())
           );
       }
-      pos.undo_temporary_move(move);
+      pos.move_with_promotion_temporary(from, to, kBishop, capture);
       if (!result)
-        return move;
+        return move_init(from, to, kBishop, capture, true);
     }
   }
 
   const Square enemy = pos.square_king(~color);
-  piece.not_and(PromotableMaskTable[color]);
+  piece = piece & NotPromotableMaskTable[color];
   while (piece.test())
   {
     // toが敵陣で成ることができる
@@ -2221,25 +2216,23 @@ search_bishop_mate(Position &pos, const BitBoard &movable, const BitBoard &occup
       if (pos.is_king_discover(from, to, color, ci.pinned))
         continue;
 
-      move = move_init(from, to, kBishop, capture, true);
-      pos.do_temporary_move(move);
+      pos.move_with_promotion_temporary(from, to, kBishop, capture);
       if (pos.is_attacked(to, ~color, pos.occupied()))
       {
         result =
           (
             can_king_escape(pos, to, BishopAttacksTable[to][0] | KingAttacksTable[to], ~color)
             ||
-            can_piece_capture(pos, to, ~color)
+            can_piece_capture(pos, to, ~color, pos.occupied())
           );
       }
-      pos.undo_temporary_move(move);
+      pos.move_with_promotion_temporary(from, to, kBishop, capture);
       if (!result)
-        return move;
+        return move_init(from, to, kBishop, capture, true);
     }
 
     // fromもtoも敵陣になく成ることができない
-    BitBoard not_promotable = dest;
-    not_promotable.not_and(PromotableMaskTable[color]);
+    BitBoard not_promotable = dest & NotPromotableMaskTable[color];
     BitBoard not_promotable_dest = (not_promotable & (SilverAttacksTable[kBlack][enemy] & SilverAttacksTable[kWhite][enemy]));
     while (not_promotable_dest.test())
     {
@@ -2249,20 +2242,19 @@ search_bishop_mate(Position &pos, const BitBoard &movable, const BitBoard &occup
       if (pos.is_king_discover(from, to, color, ci.pinned))
         continue;
 
-      move = move_init(from, to, kBishop, capture, false);
-      pos.do_temporary_move(move);
+      pos.move_temporary(from, to, kBishop, capture);
       if (pos.is_attacked(to, ~color, pos.occupied()))
       {
         result =
           (
             can_king_escape(pos, to, BishopAttacksTable[to][0], ~color)
             ||
-            can_piece_capture(pos, to, ~color)
+            can_piece_capture(pos, to, ~color, pos.occupied())
           );
       }
-      pos.undo_temporary_move(move);
+      pos.move_temporary(from, to, kBishop, capture);
       if (!result)
-        return move;
+        return move_init(from, to, kBishop, capture, false);
     }
   }
 
@@ -2274,7 +2266,6 @@ search_rook_mate(Position &pos, const BitBoard &movable, const BitBoard &occupie
 {
   Color color = pos.side_to_move();
   BitBoard piece = pos.pieces(kRook, color);
-  Move move;
   bool result = true;
 
   // fromが敵陣で成ることができる場合
@@ -2291,25 +2282,24 @@ search_rook_mate(Position &pos, const BitBoard &movable, const BitBoard &occupie
       if (pos.is_king_discover(from, to, color, ci.pinned))
         continue;
 
-      move = move_init(from, to, kRook, capture, true);
-      pos.do_temporary_move(move);
+      pos.move_with_promotion_temporary(from, to, kRook, capture);
       if (pos.is_attacked(to, ~color, pos.occupied()))
       {
         result =
           (
             can_king_escape(pos, to, dragon_attack(pos.occupied(), to), ~color)
             ||
-            can_piece_capture(pos, to, ~color)
+            can_piece_capture(pos, to, ~color, pos.occupied())
           );
       }
-      pos.undo_temporary_move(move);
+      pos.move_with_promotion_temporary(from, to, kRook, capture);
       if (!result)
-        return move;
+        return move_init(from, to, kRook, capture, true);
     }
   }
 
   const Square enemy = pos.square_king(~color);
-  piece.not_and(PromotableMaskTable[color]);
+  piece = piece & NotPromotableMaskTable[color];
   while (piece.test())
   {
     // toが敵陣で成ることができる
@@ -2324,25 +2314,23 @@ search_rook_mate(Position &pos, const BitBoard &movable, const BitBoard &occupie
       if (pos.is_king_discover(from, to, color, ci.pinned))
         continue;
 
-      move = move_init(from, to, kRook, capture, true);
-      pos.do_temporary_move(move);
+      pos.move_with_promotion_temporary(from, to, kRook, capture);
       if (pos.is_attacked(to, ~color, pos.occupied()))
       {
         result =
           (
             can_king_escape(pos, to, dragon_attack(pos.occupied(), to), ~color)
             ||
-            can_piece_capture(pos, to, ~color)
+            can_piece_capture(pos, to, ~color, pos.occupied())
           );
       }
-      pos.undo_temporary_move(move);
+      pos.move_with_promotion_temporary(from, to, kRook, capture);
       if (!result)
-        return move;
+        return move_init(from, to, kRook, capture, true);
     }
 
     // fromもtoも敵陣になく成ることができない
-    BitBoard not_promotable = dest;
-    not_promotable.not_and(PromotableMaskTable[color]);
+    BitBoard not_promotable = dest & NotPromotableMaskTable[color];
     BitBoard not_promotable_dest = (not_promotable & (GoldAttacksTable[kBlack][enemy] & GoldAttacksTable[kWhite][enemy]));
     while (not_promotable_dest.test())
     {
@@ -2352,20 +2340,19 @@ search_rook_mate(Position &pos, const BitBoard &movable, const BitBoard &occupie
       if (pos.is_king_discover(from, to, color, ci.pinned))
         continue;
 
-      move = move_init(from, to, kRook, capture, false);
-      pos.do_temporary_move(move);
+      pos.move_temporary(from, to, kRook, capture);
       if (pos.is_attacked(to, ~color, pos.occupied()))
       {
         result =
           (
             can_king_escape(pos, to, RookAttacksTable[to][0], ~color)
             ||
-            can_piece_capture(pos, to, ~color)
+            can_piece_capture(pos, to, ~color, pos.occupied())
           );
       }
-      pos.undo_temporary_move(move);
+      pos.move_temporary(from, to, kRook, capture);
       if (!result)
-        return move;
+        return move_init(from, to, kRook, capture, false);
     }
   }
 
@@ -2377,7 +2364,6 @@ search_horse_mate(Position &pos, const BitBoard &movable, const BitBoard &occupi
 {
   Color color = pos.side_to_move();
   BitBoard piece = pos.pieces(kHorse, color);
-  Move move;
   bool result = true;
 
   while (piece.test())
@@ -2392,20 +2378,19 @@ search_horse_mate(Position &pos, const BitBoard &movable, const BitBoard &occupi
       if (pos.is_king_discover(from, to, color, ci.pinned))
         continue;
 
-      move = move_init(from, to, kHorse, capture, false);
-      pos.do_temporary_move(move);
+      pos.move_temporary(from, to, kHorse, capture);
       if (pos.is_attacked(to, ~color, pos.occupied()))
       {
         result =
           (
             can_king_escape(pos, to, BishopAttacksTable[to][0] | KingAttacksTable[to], ~color)
             ||
-            can_piece_capture(pos, to, ~color)
+            can_piece_capture(pos, to, ~color, pos.occupied())
           );
       }
-      pos.undo_temporary_move(move);
+      pos.move_temporary(from, to, kHorse, capture);
       if (!result)
-        return move;
+        return move_init(from, to, kHorse, capture, false);
     }
   }
   return kMoveNone;
@@ -2416,7 +2401,6 @@ search_dragon_mate(Position &pos, const BitBoard &movable, const BitBoard &occup
 {
   Color color = pos.side_to_move();
   BitBoard piece = pos.pieces(kDragon, color);
-  Move move;
   bool result = true;
 
   while (piece.test())
@@ -2431,25 +2415,23 @@ search_dragon_mate(Position &pos, const BitBoard &movable, const BitBoard &occup
       if (pos.is_king_discover(from, to, color, ci.pinned))
         continue;
 
-      move = move_init(from, to, kDragon, capture, false);
-      pos.do_temporary_move(move);
+      pos.move_temporary(from, to, kDragon, capture);
       if (pos.is_attacked(to, ~color, pos.occupied()))
       {
         result =
           (
             can_king_escape(pos, to, dragon_attack(pos.occupied(), to), ~color)
             ||
-            can_piece_capture(pos, to, ~color)
+            can_piece_capture(pos, to, ~color, pos.occupied())
           );
       }
-      pos.undo_temporary_move(move);
+      pos.move_temporary(from, to, kDragon, capture);
       if (!result)
-        return move;
+        return move_init(from, to, kDragon, capture, false);
     }
   }
   return kMoveNone;
 }
-
 Move
 search_mate1ply(Position &pos)
 {

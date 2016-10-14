@@ -69,13 +69,15 @@ public:
   int    max_ply_;
   int    calls_count_;
 
-  Position               root_pos_;
-  Search::RootMoveVector root_moves_;
-  Depth                  root_depth_;
-  HistoryStats           history_;
-  MovesStats             counter_moves_;
-  Depth                  completed_depth_;
-  std::atomic_bool       reset_calls_;
+  Position                root_pos_;
+  Search::RootMoveVector  root_moves_;
+  Depth                   root_depth_;
+  FromToStats             from_to_;
+  Depth                   completed_depth_;
+  std::atomic_bool        reset_calls_;
+  HistoryStats            history_;
+  MovesStats              counter_moves_;
+  CounterMoveHistoryStats counter_move_history_;
 };
 
 struct MainThread : public Thread
@@ -83,6 +85,7 @@ struct MainThread : public Thread
   virtual void
   search();
 
+  bool   easy_move_played;
   bool   failed_low;
   double best_move_changes;
   Value  previous_score;

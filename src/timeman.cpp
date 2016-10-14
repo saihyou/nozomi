@@ -27,35 +27,28 @@
 TimeManagement Time;
 
 void 
-TimeManagement::pv_instability(double best_move_changes) 
-{
-  unstable_pv_factor_ = 1 + best_move_changes;
-}
-
-void 
 TimeManagement::init(const Search::LimitsType &limits, Color us)
 {
   start_time_          = limits.start_time;
-  unstable_pv_factor_  = 1;
   optimum_search_time_ = limits.time[us];
   maximum_search_time_ = limits.time[us];
 
-  const int optimum_move_factor = 35;
+  const int optimum_move_factor = 40;
   const int maximum_move_factor = 10;
   optimum_search_time_ = optimum_search_time_ / optimum_move_factor;
   maximum_search_time_ = maximum_search_time_ / maximum_move_factor;
 
+  if (Options["USI_Ponder"])
+    optimum_search_time_ += optimum_search_time_ / 4;
+
   int byoyomi = limits.byoyomi - Options["ByoyomiMargin"];
   if (limits.byoyomi > 0)
   {
+    if (limits.time[us] == 0)
+      only_byoyomi_ = true;
+
     optimum_search_time_ += byoyomi;
     maximum_search_time_ += byoyomi;
-
-    if (optimum_search_time_ < byoyomi)
-      optimum_search_time_ += byoyomi;
-
-    if (maximum_search_time_ < byoyomi)
-      maximum_search_time_ += byoyomi;
   }
 
   if (limits.inc[us] > 0)
