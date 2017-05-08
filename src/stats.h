@@ -28,11 +28,14 @@
 #include "types.h"
 #include "move.h"
 
+constexpr int
+kCounterMoveThreshold = kValueZero;
+
 template<typename T, bool CM = false>
 struct Stats 
 {
-  static const Value
-  kMax = Value(1 << 28);
+  static const int
+  kMax = 1 << 28;
 
   const T *
   operator[](Piece pc) const
@@ -52,6 +55,12 @@ struct Stats
     std::memset(table, 0, sizeof(table));
   }
 
+  void
+  fill(const int &v)
+  {
+    std::fill(&table[0][0], &table[kPieceMax - 1][kBoardSquare - 1] + 1, v);
+  }
+
   void 
   update(Piece p, Square to, Move m) 
   {
@@ -59,13 +68,13 @@ struct Stats
   }
 
   void
-  update(Piece p, Square to, Value v)
+  update(Piece p, Square to, int v)
   {
-    if (abs(int(v)) >= 324)
+    if (abs(v) >= 324)
       return;
 
-    table[p][to] -= table[p][to] * abs(int(v)) / (CM ? 936 : 324);
-    table[p][to] += int(v) * 32;
+    table[p][to] -= table[p][to] * abs(v) / (CM ? 936 : 324);
+    table[p][to] += v * 32;
   }
 
 private:
@@ -73,13 +82,13 @@ private:
 };
 
 typedef Stats<Move> MovesStats;
-typedef Stats<Value, false> HistoryStats;
-typedef Stats<Value, true> CounterMoveStats;
+typedef Stats<int, false> HistoryStats;
+typedef Stats<int, true> CounterMoveStats;
 typedef Stats<CounterMoveStats> CounterMoveHistoryStats;
 
 struct FromToStats
 {
-  Value
+  int
   get(Color c, Move m) const
   {
     return table[c][move_from(m)][move_to(m)];
@@ -92,20 +101,20 @@ struct FromToStats
   }
 
   void
-  update(Color c, Move m, Value v)
+  update(Color c, Move m, int v)
   {
-    if (abs(int(v)) >= 324)
+    if (abs(v) >= 324)
       return;
 
     Square f = move_from(m);
     Square t = move_to(m);
     assert(f < kNumberOfBoardHand);
-    table[c][f][t] -= table[c][f][t] * abs(int(v)) / 324;
-    table[c][f][t] += int(v) * 32;
+    table[c][f][t] -= table[c][f][t] * abs(v) / 324;
+    table[c][f][t] += v * 32;
   }
 
 private:
-  Value table[kNumberOfColor][kNumberOfBoardHand][kBoardSquare];
+  int table[kNumberOfColor][kNumberOfBoardHand][kBoardSquare];
 };
 
 #endif

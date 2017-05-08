@@ -19,15 +19,17 @@
 #ifndef _EVALUATE_H_
 #define _EVALUATE_H_
 
+#include <array>
+
 #include "types.h"
 #include "move.h"
 
 class Position;
 struct SearchStack;
 
-namespace Eval 
+namespace Eval
 {
-enum KPPIndex
+enum KPPIndex : int16_t
 {
   kFHandPawn = 0,
   kEHandPawn = kFHandPawn + 19,
@@ -66,6 +68,12 @@ enum KPPIndex
   kFEEnd = kEDragon + 81,
   kFENone = kFEEnd
 };
+
+inline KPPIndex
+operator+(KPPIndex d1, int i)
+{
+  return KPPIndex(int(d1) + i);
+}
 
 constexpr KPPIndex
 PieceToIndexBlackTable[kPieceMax] =
@@ -233,19 +241,19 @@ KPPHandIndex[8] =
 
 enum PieceValue
 {
-  kPawnValue      = 86,
-  kLanceValue     = 235,
-  kKnightValue    = 257,
-  kSilverValue    = 369,
-  kGoldValue      = 444,
-  kProSilverValue = 489,
-  kProLanceValue  = 492,
-  kProKnightValue = 516,
-  kProPawnValue   = 542,
-  kBishopValue    = 564,
+  kPawnValue      = 88,
+  kLanceValue     = 238,
+  kKnightValue    = 259,
+  kSilverValue    = 370,
+  kGoldValue      = 448,
+  kProSilverValue = 488,
+  kProLanceValue  = 493,
+  kProKnightValue = 518,
+  kProPawnValue   = 551,
+  kBishopValue    = 565,
   kRookValue      = 637,
-  kHorseValue     = 823,
-  kDragonValue    = 946,
+  kHorseValue     = 831,
+  kDragonValue    = 954,
   kKingValue      = 15000
 };
 
@@ -301,8 +309,32 @@ ExchangePieceValueTable[kPieceTypeMax] =
   PieceValueTable[kDragon] + PieceValueTable[kRook]
 };
 
-constexpr Value
-kTempo = Value(80);
+constexpr int kTableSize = 65536;
+
+struct EvalParts
+{
+  Value black_kpp;
+  Value white_kpp;
+  Value kkpt;
+};
+
+struct Entry
+{
+  Key       key;
+  EvalParts parts;
+};
+
+struct HashTable
+{
+  Entry *
+  operator[](Key key)
+  {
+    return &table[(uint32_t)key & (kTableSize - 1)];
+  }
+
+private:
+  std::array<Entry, kTableSize> table;
+};
 
 constexpr int
 kListNum = 38;
@@ -326,7 +358,6 @@ Value
 calc_kkpt_value(const Position &pos);
 
 extern int16_t KPP[kBoardSquare][kFEEnd][kFEEnd];
-extern int16_t KKP[kBoardSquare][kBoardSquare][kFEEnd];
 extern int16_t KKPT[kBoardSquare][kBoardSquare][kFEEnd][kNumberOfColor];
 
 } // namespace Eval

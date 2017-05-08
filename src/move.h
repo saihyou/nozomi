@@ -21,6 +21,7 @@
 
 #include <stdint.h>
 #include <string>
+#include <immintrin.h>
 #include "types.h"
 
 class Position;
@@ -49,7 +50,7 @@ enum Move : uint32_t
 struct ExtMove 
 {
   Move  move;
-  Value value;
+  int   value;
 
   operator Move() const
   {
@@ -241,6 +242,18 @@ PieceTypeToHandTable[kPieceTypeMax] =
   kHandRook    // Dragon
 };
 
+enum HandType : uint32_t
+{
+  kHandPawnExist = (HandMaskTable[kPawn] + (1 << HandShiftTable[kPawn])),
+  kHandLanceExist = (HandMaskTable[kLance] + (1 << HandShiftTable[kLance])),
+  kHandKnightExist = (HandMaskTable[kKnight] + (1 << HandShiftTable[kKnight])),
+  kHandSilverExist = (HandMaskTable[kSilver] + (1 << HandShiftTable[kSilver])),
+  kHandGoldExist = (HandMaskTable[kGold] + (1 << HandShiftTable[kGold])),
+  kHandBishopExist = (HandMaskTable[kBishop] + (1 << HandShiftTable[kBishop])),
+  kHandRookExist = (HandMaskTable[kRook] + (1 << HandShiftTable[kRook])),
+  kHandTypeMask  = kHandPawnExist | kHandLanceExist | kHandKnightExist | kHandSilverExist | kHandGoldExist | kHandBishopExist | kHandRookExist
+};
+
 constexpr uint32_t
 kHandBorrowMask =
 #if 1
@@ -273,6 +286,12 @@ inline bool
 has_hand_except_pawn(Hand h)
 {
   return (h >> HandShiftTable[kLance]) != kHandZero;
+}
+
+inline HandType
+extract_piece_without_pawn(Hand h)
+{
+  return HandType((h + 0x6DDDDC0) & kHandTypeMask);
 }
 
 inline int

@@ -25,22 +25,20 @@
 
 #include "evaluate.h"
 #include "position.h"
+#include "thread.h"
 #include "search.h"
 #include "misc.h"
 
 namespace Eval
 {
 int16_t KPP[kBoardSquare][kFEEnd][kFEEnd];
-int16_t KKP[kBoardSquare][kBoardSquare][kFEEnd];
 int16_t KKPT[kBoardSquare][kBoardSquare][kFEEnd][kNumberOfColor];
 
-Value
-calc_full(const Position &pos, SearchStack *ss)
+void
+calc_full(const Position &pos, EvalParts &parts)
 {
-  int *list_black = pos.black_kpp_list();
-  int *list_white = pos.white_kpp_list();
-
-  int score = 0;
+  KPPIndex *list_black = pos.black_kpp_list();
+  KPPIndex *list_white = pos.white_kpp_list();
 
   Square sq_black_king = pos.square_king(kBlack);
   Square sq_white_king = pos.square_king(kWhite);
@@ -49,7 +47,6 @@ calc_full(const Position &pos, SearchStack *ss)
   Color side_to_move = pos.side_to_move();
   int black_kpp = 0;
   int white_kpp = 0;
-  int kkp  = KKP[sq_black_king][sq_white_king][list_black[0]];
   int kkpt = KKPT[sq_black_king][sq_white_king][list_black[0]][side_to_move];
   for (int i = 1; i < kListNum; ++i)
   {
@@ -62,31 +59,25 @@ calc_full(const Position &pos, SearchStack *ss)
       black_kpp += KPP[sq_black_king][k0][l0];
       white_kpp -= KPP[inv_sq_white_king][k1][l1];
     }
-    kkp  += KKP[sq_black_king][sq_white_king][k0];
     kkpt += KKPT[sq_black_king][sq_white_king][k0][side_to_move];
   }
 
-  ss->black_kpp = static_cast<Value>(black_kpp);
-  ss->white_kpp = static_cast<Value>(white_kpp);
-  ss->kkp       = static_cast<Value>(kkp);
-  ss->kkpt      = static_cast<Value>(kkpt);
-  ss->material  = static_cast<Value>(pos.material() * kFvScale);
-  score = ss->black_kpp + ss->white_kpp + ss->kkp + ss->material + ss->kkpt;
-
-  return static_cast<Value>(score);
+  parts.black_kpp = static_cast<Value>(black_kpp);
+  parts.white_kpp = static_cast<Value>(white_kpp);
+  parts.kkpt      = static_cast<Value>(kkpt);
 }
 
 void
-calc_no_capture_difference(const Position &pos, SearchStack *ss)
+calc_no_capture_difference(const Position &pos, const EvalParts &last_parts, EvalParts &parts)
 {
   Square    black_king        = pos.square_king(kBlack);
   Square    white_king        = pos.square_king(kWhite);
   Square    inv_white_king    = inverse(white_king);
 
-  const int *prev_list_black   = pos.prev_black_kpp_list();
-  const int *prev_list_white   = pos.prev_white_kpp_list();
-  const int *list_black        = pos.black_kpp_list();
-  const int *list_white        = pos.white_kpp_list();
+  const KPPIndex *prev_list_black   = pos.prev_black_kpp_list();
+  const KPPIndex *prev_list_white   = pos.prev_white_kpp_list();
+  const KPPIndex *list_black        = pos.black_kpp_list();
+  const KPPIndex *list_white        = pos.white_kpp_list();
 
   assert(pos.list_index_move() < 38);
 
@@ -112,29 +103,23 @@ calc_no_capture_difference(const Position &pos, SearchStack *ss)
 
     kkpt += KKPT[black_king][white_king][list_black[i]][side_to_move];
   }
-  // 前回のを引く
-  int kkp_diff = -KKP[black_king][white_king][prev_list_black[pos.list_index_move()]];
-  // 今回のを足す
-  kkp_diff += KKP[black_king][white_king][list_black[pos.list_index_move()]];
 
-  ss->black_kpp = (ss - 1)->black_kpp + black_kpp_diff;
-  ss->white_kpp = (ss - 1)->white_kpp + white_kpp_diff;
-  ss->kkp       = (ss - 1)->kkp + kkp_diff;
-  ss->kkpt      = static_cast<Value>(kkpt);
-  ss->material  = static_cast<Value>(pos.material() * kFvScale);
+  parts.black_kpp = last_parts.black_kpp + black_kpp_diff;
+  parts.white_kpp = last_parts.white_kpp + white_kpp_diff;
+  parts.kkpt      = static_cast<Value>(kkpt);
 }
 
 void
-calc_difference_capture(const Position &pos, SearchStack *ss)
+calc_difference_capture(const Position &pos, const EvalParts &last_parts, EvalParts &parts)
 {
   Square    black_king        = pos.square_king(kBlack);
   Square    white_king        = pos.square_king(kWhite);
   Square    inv_white_king    = inverse(white_king);
 
-  const int *prev_list_black   = pos.prev_black_kpp_list();
-  const int *prev_list_white   = pos.prev_white_kpp_list();
-  const int *list_black        = pos.black_kpp_list();
-  const int *list_white        = pos.white_kpp_list();
+  const KPPIndex *prev_list_black   = pos.prev_black_kpp_list();
+  const KPPIndex *prev_list_white   = pos.prev_white_kpp_list();
+  const KPPIndex *list_black        = pos.black_kpp_list();
+  const KPPIndex *list_white        = pos.white_kpp_list();
 
   assert(pos.list_index_capture() < 38);
   assert(pos.list_index_move() < 38);
@@ -183,24 +168,17 @@ calc_difference_capture(const Position &pos, SearchStack *ss)
   // 今回ので足しすぎたのを引く
   white_kpp_diff += white_kpp_table[list_white[pos.list_index_capture()]];
 
-  int kkp_diff = -KKP[black_king][white_king][prev_list_black[pos.list_index_move()]];
-  kkp_diff -= KKP[black_king][white_king][prev_list_black[pos.list_index_capture()]];
-  kkp_diff += KKP[black_king][white_king][list_black[pos.list_index_move()]];
-  kkp_diff += KKP[black_king][white_king][list_black[pos.list_index_capture()]];
-
-  ss->black_kpp = (ss - 1)->black_kpp + black_kpp_diff;
-  ss->white_kpp = (ss - 1)->white_kpp + white_kpp_diff;
-  ss->kkp       = (ss - 1)->kkp + kkp_diff;
-  ss->kkpt      = static_cast<Value>(kkpt);
-  ss->material  = static_cast<Value>(pos.material() * kFvScale);
+  parts.black_kpp = last_parts.black_kpp + black_kpp_diff;
+  parts.white_kpp = last_parts.white_kpp + white_kpp_diff;
+  parts.kkpt      = static_cast<Value>(kkpt);
 }
 
 template<Color kColor>
 void
-calc_difference_king_move_no_capture(const Position &pos, SearchStack *ss)
+calc_difference_king_move_no_capture(const Position &pos, const EvalParts &last_parts, EvalParts &parts)
 {
-  const int *list_black = pos.black_kpp_list();
-  const int *list_white = pos.white_kpp_list();
+  const KPPIndex *list_black = pos.black_kpp_list();
+  const KPPIndex *list_white = pos.white_kpp_list();
   const Square sq_black_king = pos.square_king(kBlack);
   const Square sq_white_king = pos.square_king(kWhite);
   Square inv_sq_white_king = inverse(pos.square_king(kWhite));
@@ -208,8 +186,6 @@ calc_difference_king_move_no_capture(const Position &pos, SearchStack *ss)
   Color side_to_move = pos.side_to_move();
   int black_kpp = 0;
   int white_kpp = 0;
-  const auto *kkp_table = KKP[sq_black_king][sq_white_king];
-  int kkp  = kkp_table[list_black[0]];
   int kkpt = KKPT[sq_black_king][sq_white_king][list_black[0]][side_to_move];
   if (kColor == kBlack)
   {
@@ -223,11 +199,10 @@ calc_difference_king_move_no_capture(const Position &pos, SearchStack *ss)
         const int l0 = list_black[j];
         black_kpp += black_pp_table[l0];
       }
-      kkp  += kkp_table[k0];
       kkpt += KKPT[sq_black_king][sq_white_king][list_black[i]][side_to_move];
     }
-    ss->black_kpp = static_cast<Value>(black_kpp);
-    ss->white_kpp = (ss - 1)->white_kpp;
+    parts.black_kpp = static_cast<Value>(black_kpp);
+    parts.white_kpp = last_parts.white_kpp;
   }
   else
   {
@@ -241,19 +216,16 @@ calc_difference_king_move_no_capture(const Position &pos, SearchStack *ss)
         const int l1 = list_white[j];
         white_kpp -= white_pp_table[l1];
       }
-      kkp  += kkp_table[list_black[i]];
       kkpt += KKPT[sq_black_king][sq_white_king][list_black[i]][side_to_move];
     }
-    ss->black_kpp = (ss - 1)->black_kpp;
-    ss->white_kpp = static_cast<Value>(white_kpp);
+    parts.black_kpp = last_parts.black_kpp;
+    parts.white_kpp = static_cast<Value>(white_kpp);
   }
-  ss->kkp      = static_cast<Value>(kkp);
-  ss->kkpt     = static_cast<Value>(kkpt);
-  ss->material = static_cast<Value>(pos.material() * kFvScale);
+  parts.kkpt     = static_cast<Value>(kkpt);
 }
 
 void
-calc_difference(const Position &pos, Move last_move, SearchStack *ss)
+calc_difference(const Position &pos, Move last_move, const EvalParts &last_parts, EvalParts &parts)
 {
   const Square    from = move_from(last_move);
   const PieceType type = move_piece_type(last_move);
@@ -261,24 +233,24 @@ calc_difference(const Position &pos, Move last_move, SearchStack *ss)
   if (type == kKing)
   {
     if (pos.side_to_move() == kBlack)
-      calc_difference_king_move_no_capture<kWhite>(pos, ss);
+      calc_difference_king_move_no_capture<kWhite>(pos, last_parts, parts);
     else
-      calc_difference_king_move_no_capture<kBlack>(pos, ss);
+      calc_difference_king_move_no_capture<kBlack>(pos, last_parts, parts);
   }
   else
   {
     if (from >= kBoardSquare)
     {
-      calc_no_capture_difference(pos, ss);
+      calc_no_capture_difference(pos, last_parts, parts);
     }
     else
     {
       const PieceType capture = move_capture(last_move);
 
       if (capture == kPieceNone)
-        calc_no_capture_difference(pos, ss);
+        calc_no_capture_difference(pos, last_parts, parts);
       else
-        calc_difference_capture(pos, ss);
+        calc_difference_capture(pos, last_parts, parts);
     }
   }
 }
@@ -290,7 +262,7 @@ calc_kkpt_value(const Position &pos)
   Square black_king = pos.square_king(kBlack);
   Square white_king = pos.square_king(kWhite);
   Color color = pos.side_to_move();
-  int *list_black = pos.black_kpp_list();
+  KPPIndex *list_black = pos.black_kpp_list();
 
   for (int i = 0; i < kListNum; ++i)
     score += KKPT[black_king][white_king][list_black[i]][color];
@@ -301,49 +273,61 @@ Value
 evaluate(const Position &pos, SearchStack *ss)
 {
   Value score;
-
-  Move last_move = (ss - 1)->current_move;
-  if ((ss - 1)->evaluated && (ss - 1)->current_move == kMoveNull)
+  Entry *e = pos.this_thread()->eval_hash_[pos.key()];
+  if (e->key == pos.key())
   {
-    
-    ss->black_kpp = (ss - 1)->black_kpp;
-    ss->white_kpp = (ss - 1)->white_kpp;
-    ss->kkp       = (ss - 1)->kkp;
-    ss->kkpt      = calc_kkpt_value(pos);
-    ss->material  = (ss - 1)->material;
-    score = ss->black_kpp + ss->white_kpp + ss->kkp + ss->material + ss->kkpt;
-  }
-  else if ((ss - 1)->evaluated && !(move_piece_type(last_move) == kKing && move_is_capture(last_move)))
-  {
-    calc_difference(pos, last_move, ss);
-    score = ss->black_kpp + ss->white_kpp + ss->kkp + ss->material + ss->kkpt;
+    ss->eval_parts = e->parts;
   }
   else
   {
-    score = calc_full(pos, ss);
+    Move last_move = (ss - 1)->current_move;
+    if ((ss - 1)->evaluated && (ss - 1)->current_move == kMoveNull)
+    {
+      ss->eval_parts.black_kpp = (ss - 1)->eval_parts.black_kpp;
+      ss->eval_parts.white_kpp = (ss - 1)->eval_parts.white_kpp;
+      ss->eval_parts.kkpt      = calc_kkpt_value(pos);
+      ss->material  = (ss - 1)->material;
+      score = ss->eval_parts.black_kpp + ss->eval_parts.white_kpp + ss->material + ss->eval_parts.kkpt;
+    }
+    else if ((ss - 1)->evaluated && !(move_piece_type(last_move) == kKing && move_is_capture(last_move)))
+    {
+      calc_difference(pos, last_move, (ss - 1)->eval_parts, ss->eval_parts);
+      score = ss->eval_parts.black_kpp + ss->eval_parts.white_kpp + ss->material + ss->eval_parts.kkpt;
+    }
+    else
+    {
+      calc_full(pos, ss->eval_parts);
+    }
+    e->key = pos.key();
+    e->parts = ss->eval_parts;
   }
+
   ss->evaluated = true;
+  ss->material  = static_cast<Value>(pos.material() * kFvScale);
+
+  score = ss->eval_parts.black_kpp + ss->eval_parts.white_kpp + ss->material + ss->eval_parts.kkpt;
   score = pos.side_to_move() == kWhite ? -score : score;
   score /= kFvScale;
 
   assert(score > -kValueInfinite && score < kValueInfinite);
-
-  return score + kTempo;
+#ifdef LEARN
+  return score;
+#else
+  return score + 20;
+#endif
 }
   
 bool
 init() 
 {
-  std::ifstream ifs("kpp_kkp_kkpt.bin", std::ios::in | std::ios::binary);
+  std::ifstream ifs("kpp_kkpt.bin", std::ios::in | std::ios::binary);
   if (!ifs)
   {
     std::memset(KPP, 0, sizeof(KPP));
-    std::memset(KKP, 0, sizeof(KKP));
     std::memset(KKPT, 0, sizeof(KKPT));
     return false;
   }
   ifs.read(reinterpret_cast<char *>(KPP), sizeof(KPP));
-  ifs.read(reinterpret_cast<char *>(KKP), sizeof(KKP));
   ifs.read(reinterpret_cast<char *>(KKPT), sizeof(KKPT));
   ifs.close();
 

@@ -86,6 +86,9 @@ format_move(Move m);
 
 Move
 to_move(const Position &pos, std::string &str);
+
+std::string
+to_sfen(const Position &pos);
 } // namespace USI
 
 extern USI::OptionsMap Options;

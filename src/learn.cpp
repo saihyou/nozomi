@@ -695,7 +695,7 @@ void
 Learner::update_fv(int16_t &v, std::atomic<float> &dv_ref)
 {
   float dv = dv_ref.load();
-  const int step = _mm_popcnt_u64(mt64_() & update_mask_);
+  const int step = static_cast<int>(_mm_popcnt_u64(mt64_() & update_mask_));
   if (UsePenalty)
   {
     if (v > 0)
@@ -729,7 +729,7 @@ Learner::update_eval()
   add_part_param<false>();
   std::ofstream fs("new_fv.bin", std::ios::binary);
   fs.write(reinterpret_cast<char *>(Eval::KPP), sizeof(Eval::KPP));
-  fs.write(reinterpret_cast<char *>(Eval::KKP), sizeof(Eval::KKP));
+  fs.write(reinterpret_cast<char *>(Eval::KKPT), sizeof(Eval::KKPT));
   fs.close();
 }
 
@@ -1749,7 +1749,10 @@ Learner::add_part_param()
           }
           
           if (!Divide)
-            Eval::KKP[k1][k2][i] = static_cast<int16_t>((std::round(static_cast<double>(kkp_tmp) / static_cast<double>(kkp_num))));
+          {
+            Eval::KKPT[k1][k2][i][0] = static_cast<int16_t>((std::round(static_cast<double>(kkp_tmp) / static_cast<double>(kkp_num))));
+            Eval::KKPT[k1][k2][i][1] = static_cast<int16_t>((std::round(static_cast<double>(kkp_tmp) / static_cast<double>(kkp_num))));
+          }
         }
       }
     }

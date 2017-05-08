@@ -30,7 +30,7 @@ class TimeManagement
 {
 public:
   void 
-  init(const Search::LimitsType &limits, Color us);
+  init(const Search::LimitsType &limits, Color us, int ply);
   
   int
   optimum() const

@@ -30,9 +30,8 @@
 #include "position.h"
 
 // key        32 bit Stockfishは16bitだが、衝突が多いので32bitにする
-// move       16 bit
+// move       32 bit
 // value      16 bit
-// eval value 16 bit
 // generation  6 bit
 // bound type  2 bit
 // depth       8 bit
@@ -40,21 +39,15 @@ class TTEntry
 {
 public:
   Move 
-  move(const Position &pos) const
+  move() const
   {
-    return uint16_to_move(pos);
+    return static_cast<Move>(move32_);
   }
 
   Value 
   value() const
   {
     return static_cast<Value>(value16_); 
-  }
-
-  Value 
-  eval_value() const
-  { 
-    return static_cast<Value>(eval_value16_); 
   }
 
   Depth 
@@ -70,51 +63,30 @@ public:
   }
 
   void 
-  save(Key k, Value v, Bound b, Depth d, Move m, Value ev, uint8_t g) 
+  save(Key k, Value v, Bound b, Depth d, Move m, uint8_t g) 
   {
+
     if (m || (k >> 32) != key32_)
-      move16_ = to_uint16(m);
+      move32_ = m;
 
     if
     (
       (k >> 32) != key32_
       ||
-      d > depth8_ - 2
+      d  / kOnePly > depth8_ - 4
       ||
       b == kBoundExact
     )
     {
       key32_                 = (uint32_t)(k >> 32);
       value16_               = (int16_t)v;
-      eval_value16_          = (int16_t)ev;
       generation_and_bound8_ = (uint8_t)(g | b);
-      depth8_                = (int8_t)d;
+      depth8_                = (int8_t)(d / kOnePly);
     }
   }
 
 private:
   friend class TranspositionTable;
-
-  Move
-  uint16_to_move(const Position &pos) const
-  {
-    const Square from =  static_cast<Square>((move16_ >> 7) & 0x007fU);
-    if (from >= kBoardSquare)
-    {
-      return static_cast<Move>(move16_);
-    }
-
-    const Square to = static_cast<Square>((move16_ >> 0) & 0x007fU);
-    const PieceType piece = type_of(pos.square(from));
-    const PieceType capture = type_of(pos.square(to));
-    return Move(static_cast<uint32_t>(move16_) | static_cast<uint32_t>(piece << 15) | static_cast<uint32_t>(capture << 19));
-  }
-
-  uint16_t
-  to_uint16(Move m)
-  {
-    return static_cast<uint16_t>(m & 0x7fffU);
-  }
 
   uint8_t
   generation() const
@@ -123,9 +95,8 @@ private:
   }
 
   uint32_t key32_;
-  uint16_t move16_;
+  uint32_t move32_;
   int16_t  value16_;
-  int16_t  eval_value16_;
   uint8_t  generation_and_bound8_;
   int8_t   depth8_;
 };

@@ -37,19 +37,40 @@ enum Stages
   kQSearchRecaptures, kRecaptures
 };
 
-void
-insertion_sort(ExtMove *begin, ExtMove *end)
+constexpr int
+RawPieceValueTable[kPieceTypeMax] =
 {
-  ExtMove tmp;
-  ExtMove *p;
-  ExtMove *q;
+  0,
+  Eval::PieceValueTable[kPawn],
+  Eval::PieceValueTable[kLance],
+  Eval::PieceValueTable[kKnight],
+  Eval::PieceValueTable[kSilver],
+  Eval::PieceValueTable[kBishop],
+  Eval::PieceValueTable[kRook],
+  Eval::PieceValueTable[kGold],
+  0,
+  Eval::PieceValueTable[kPawn],
+  Eval::PieceValueTable[kLance],
+  Eval::PieceValueTable[kKnight],
+  Eval::PieceValueTable[kSilver],
+  Eval::PieceValueTable[kBishop],
+  Eval::PieceValueTable[kRook]
+};
 
-  for (p = begin + 1; p < end; ++p)
+void
+partial_insertion_sort(ExtMove *begin, ExtMove *end, int limit)
+{
+  for (ExtMove *sorted_end = begin + 1, *p = begin + 1; p < end; ++p)
   {
-    tmp = *p;
-    for (q = p; q != begin && *(q - 1) < tmp; --q)
-      *q = *(q - 1);
-    *q = tmp;
+    if (p->value >= limit)
+    {
+      ExtMove tmp = *p;
+      ExtMove *q;
+      for (q = sorted_end; q != begin && *(q - 1) < tmp; --q)
+        *q = *(q - 1);
+      *q = tmp;
+      ++sorted_end;
+    }
   }
 }
 
@@ -76,6 +97,8 @@ pos_(p), ss_(s), depth_(d)
   Square prev_sq = move_to((ss_ - 1)->current_move);
   Piece prev_piece = move_piece((ss_ - 1)->current_move, ~pos_.side_to_move());
   countermove_ = pos_.this_thread()->counter_moves_[prev_piece][prev_sq];
+  killers_[0] = ss_->killers[0];
+  killers_[1] = ss_->killers[1];
 
   stage_ = pos_.in_check() ? kEvasion : kMainSearch;
   tt_move_ = (ttm && pos_.pseudo_legal(ttm) ? ttm : kMoveNone);
@@ -138,7 +161,7 @@ pos_(p), threshold_(th)
       &&
       move_is_capture(ttm)
       &&
-      pos_.see(ttm) > threshold_
+      pos_.see_ge(ttm, threshold_)
     )
     ?
     ttm
@@ -152,14 +175,9 @@ template<>
 void
 MovePicker::score<kCaptures>()
 {
-
-  // Stockfishは自陣から離れているとペナルティを入れているが
-  // 将棋としては意味ないのでは
   for (auto &m : *this)
   {
-    m.value = static_cast<Value>(Eval::PieceValueTable[move_capture(m)]);
-    if (move_is_promote(m))
-      m.value += static_cast<Value>(Eval::PromotePieceValueTable[move_piece_type(m)]);
+    m.value = RawPieceValueTable[move_capture(m)];
   }
 }
 
@@ -170,16 +188,19 @@ MovePicker::score<kQuiets>()
   const HistoryStats &history = pos_.this_thread()->history_;
   const FromToStats &from_to = pos_.this_thread()->from_to_;
   
-  const CounterMoveStats *cm = (ss_ - 1)->counter_moves;
-  const CounterMoveStats *fm = (ss_ - 2)->counter_moves;
+  const CounterMoveStats &cmh = *(ss_ - 1)->counter_moves;
+  const CounterMoveStats &fmh = *(ss_ - 2)->counter_moves;
+  const CounterMoveStats &fm2 = *(ss_ - 4)->counter_moves;
   for (auto &m : *this)
   {
     m.value =
       history[move_piece(m, pos_.side_to_move())][move_to(m)]
       +
-      (cm ? (*cm)[move_piece(m, pos_.side_to_move())][move_to(m)] : kValueZero)
+      cmh[move_piece(m, pos_.side_to_move())][move_to(m)]
       +
-      (fm ? (*fm)[move_piece(m, pos_.side_to_move())][move_to(m)] : kValueZero)
+      fmh[move_piece(m, pos_.side_to_move())][move_to(m)]
+      +
+      fm2[move_piece(m, pos_.side_to_move())][move_to(m)]
       +
       from_to.get(pos_.side_to_move(), m);
   }
@@ -192,22 +213,12 @@ MovePicker::score<kEvasions>()
   const HistoryStats &history = pos_.this_thread()->history_;
   const FromToStats &from_to = pos_.this_thread()->from_to_;
   Color c = pos_.side_to_move();
-  Value see;
 
   for (auto &m : *this)
   {
-    see = pos_.see_sign(m);
-    if (see < kValueZero)
+    if (move_is_capture(m))
     {
-      m.value = see - HistoryStats::kMax;
-    }
-    else if (move_is_capture(m))
-    {
-      PieceType pt = move_piece_type(m);
-      if (move_is_promote(m))
-        pt = pt + kFlagPromoted;
-      m.value =
-        static_cast<Value>(Eval::ExchangePieceValueTable[move_capture(m)] - Eval::ExchangePieceValueTable[pt] + HistoryStats::kMax);
+      m.value = RawPieceValueTable[move_capture(m)] + HistoryStats::kMax;
     }
     else
     {
@@ -243,7 +254,7 @@ MovePicker::next_move()
       move = pick_best(cur_++, end_moves_);
       if (move != tt_move_)
       {
-        if (pos_.see_sign(move) >= kValueZero)
+        if (pos_.see_ge(move, kValueZero))
           return move;
 
         *end_bad_captures_++ = move;
@@ -251,7 +262,7 @@ MovePicker::next_move()
     }
 
     ++stage_;
-    move = ss_->killers[0];
+    move = killers_[0];
     if
     (
       move != kMoveNone
@@ -266,7 +277,7 @@ MovePicker::next_move()
 
   case kKillers:
     ++stage_;
-    move = ss_->killers[1];
+    move = killers_[1];
     if
     (
       move != kMoveNone
@@ -288,9 +299,9 @@ MovePicker::next_move()
       &&
       move != tt_move_
       &&
-      move != ss_->killers[0]
+      move != killers_[0]
       &&
-      move != ss_->killers[1]
+      move != killers_[1]
       &&
       pos_.pseudo_legal(move)
       &&
@@ -302,16 +313,7 @@ MovePicker::next_move()
     cur_ = end_bad_captures_;
     end_moves_ = generate<kQuiets>(pos_, cur_);
     score<kQuiets>();
-    if (depth_ < 3 * kOnePly)
-    {
-      ExtMove *good_quiet =
-        std::partition(cur_, end_moves_, [](const ExtMove &m){ return m.value > kValueZero; });
-      insertion_sort(cur_, good_quiet);
-    }
-    else
-    {
-      insertion_sort(cur_, end_moves_);
-    }
+    partial_insertion_sort(cur_, end_moves_, -8000 * depth_ / kOnePly);
     ++stage_;
 
   case kQuiet:
@@ -322,9 +324,9 @@ MovePicker::next_move()
       (
         move != tt_move_
         &&
-        move != ss_->killers[0]
+        move != killers_[0]
         &&
-        move != ss_->killers[1]
+        move != killers_[1]
         &&
         move != countermove_
       )
@@ -364,7 +366,7 @@ MovePicker::next_move()
     while (cur_ < end_moves_)
     {
       move = pick_best(cur_++, end_moves_);
-      if (move != tt_move_ && pos_.see(move) > threshold_)
+      if (move != tt_move_ && pos_.see_ge(move, threshold_))
         return move;
     }
     break;

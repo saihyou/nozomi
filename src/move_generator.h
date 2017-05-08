@@ -24,6 +24,8 @@
 #ifndef _MOVE_GENERATOR_H_
 #define _MOVE_GENERATOR_H_
 
+#include <algorithm>
+
 #include "types.h"
 #include "move.h"
 
@@ -91,12 +93,13 @@ struct MoveList
   bool
   contains(Move m) const
   {
-    for (const ExtMove *it(mlist); it != last; ++it)
-    {
-      if (it->move == m)
-        return true;
-    }
-    return false;
+    return std::find(begin(), end(), m) != end();
+  }
+
+  Move
+  operator[](int n)
+  {
+    return mlist[n];
   }
 
 private:

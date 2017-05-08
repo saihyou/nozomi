@@ -57,6 +57,15 @@ const string SquareToStringTable[] =
   "9i", "8i", "7i", "6i", "5i", "4i", "3i", "2i", "1i"
 };
 
+const string PieceStringTable[] =
+{
+  "",
+  "P", "L", "N", "S", "B", "R", "G", "K", "+P", "+L", "+N", "+S", "+B", "+R",
+  "", "",
+  "p", "l", "n", "s", "b", "r", "g", "k", "+p", "+l", "+n", "+s", "+b", "+r"
+  ""
+};
+
 const char *kPieceToChar = " PLNSBRGK";
 
 void 
@@ -326,4 +335,74 @@ USI::to_move(const Position &pos, string &str)
   }
 
   return kMoveNone;
+}
+
+std::string
+USI::to_sfen(const Position &pos)
+{
+  string s;
+  int empty = 0;
+  Square sq = k9A;
+  for (File y = kFile1; y < kNumberOfFile; ++y)
+  {
+    for (Rank x = kRank1; x < kNumberOfRank; ++x)
+    {
+      Piece p = pos.square(sq);
+      if (p != kEmpty)
+      {
+        if (empty > 0)
+        {
+          s += std::to_string(empty);
+          empty = 0;
+        }
+        s += PieceStringTable[p];
+      }
+      else
+      {
+        empty += 1;
+      }
+      ++sq;
+    }
+
+    if (empty > 0)
+    {
+      s += std::to_string(empty);
+      empty = 0;
+    }
+
+    if (y != kNumberOfFile - 1)
+      s += "/";
+  }
+
+  if (pos.side_to_move() == kBlack)
+    s += " b ";
+  else
+    s += " w ";
+
+  string h;
+  for (Color c = kBlack; c < kNumberOfColor; ++c)
+  {
+    Hand hand = pos.hand(c);
+    for (PieceType pt = kPawn; pt < kKing; ++pt)
+    {
+      int num = number_of(hand, pt);
+      if (num > 0)
+      {
+        if (num > 1)
+          h += std::to_string(num);
+        Piece p = make_piece(pt, c);
+        h += PieceStringTable[p];
+      }
+    }
+  }
+
+  if (h.empty())
+    s += "-";
+  else
+    s += h;
+
+  s += " ";
+  s += std::to_string(pos.game_ply());
+
+  return s;
 }

@@ -75,8 +75,11 @@ TranspositionTable::probe(const Key key, bool *found) const
       )
         tte[i].generation_and_bound8_ = static_cast<uint8_t>(generation_ | tte[i].bound()); // Refresh
 
+#ifdef DISABLE_TT
+      *found = false;
+#else
       *found = (tte[i].key32_ != 0);
-
+#endif
       return &tte[i];
     }
   }

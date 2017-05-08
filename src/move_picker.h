@@ -63,6 +63,7 @@ private:
 
   const Position         &pos_;
   const SearchStack      *ss_;
+  Move                    killers_[2];
   Move                    countermove_;
   Depth                   depth_;
   Move                    tt_move_;

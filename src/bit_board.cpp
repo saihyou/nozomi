@@ -116,6 +116,18 @@ MustPromoteMaskTable[kNumberOfColor] =
   BitBoard(0x3FFFFULL, 0), BitBoard(0, 0x3FFFFULL)
 };
 
+const BitBoard
+KnightDropableMaskTable[kNumberOfColor] =
+{
+  BitBoard(0x7FFFFFFFFFFC0000ULL, 0x3FFFFULL), BitBoard(0x7FFFFFFFFFFFFFFFULL, 0)
+};
+
+const BitBoard
+LanceDropableMaskTable[kNumberOfColor] =
+{
+  BitBoard(0x7FFFFFFFFFFFFE00ULL, 0x3FFFFULL), BitBoard(0x7FFFFFFFFFFFFFFFULL, 0x1FFULL)
+};
+
 BitBoard
 RookMaskTable[kBoardSquare];
 BitBoard
@@ -157,6 +169,9 @@ DirectionTable[kBoardSquare][kBoardSquare];
 
 BitBoard 
 BetweenTable[kBoardSquare][kBoardSquare];
+
+BitBoard
+PawnDropableTable[512][kNumberOfColor];
 
 namespace
 {
@@ -578,6 +593,26 @@ set_bishop_attacks(int rank, int file)
 }
 
 void 
+set_pawn_dropable()
+{
+  for (uint16_t i = 0; i < 512; ++i)
+  {
+    BitBoard b(0, 0);
+    for (int j = 0; j < 9; ++j)
+    {
+      if (((i >> j) & 1) == 0)
+        b = b | FileMaskTable[j];
+    }
+    BitBoard b_black = b;
+    b_black.not_and(RankMaskTable[kRank1]);
+    PawnDropableTable[i][kBlack] = b_black;
+    BitBoard b_white = b;
+    b_white.not_and(RankMaskTable[kRank9]);
+    PawnDropableTable[i][kWhite] = b_white;
+  }
+}
+
+void
 initialize_attacks()
 {
   BishopAttacksTable[0] = BishopTable;
@@ -606,6 +641,7 @@ initialize_attacks()
       set_bishop_attacks(rank, file);
     }
   }
+  set_pawn_dropable();
 }
 
 void 

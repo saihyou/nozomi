@@ -28,18 +28,17 @@
 struct PositionData
 {
   std::string sfen;
-  int         value;
+  Value       value;
+  Color       win;
 };
 
-// 勾配でもなんでもなくなったけどこのままで
-// learn.hのとほとんど一緒だけど、BonanzaMethodを今後どうするかで考える
 struct Gradient
 {
-  int kpp[kBoardSquare][Eval::kFEEnd][Eval::kFEEnd];
-  int kkp[kBoardSquare][kBoardSquare][Eval::kFEEnd];
-  int kkpt[kBoardSquare][kBoardSquare][Eval::kFEEnd][kNumberOfColor];
+  double kpp[kBoardSquare][Eval::kFEEnd][Eval::kFEEnd];
+  double kkp[kBoardSquare][kBoardSquare][Eval::kFEEnd];
+  double kkpt[kBoardSquare][kBoardSquare][Eval::kFEEnd][kNumberOfColor];
 
-  void increment(const Position &pos, int step);
+  void increment(const Position &pos, double delta);
   void clear();
 };
 
@@ -49,20 +48,20 @@ operator+=(Gradient &lhs, Gradient &rhs);
 class Reinforcer
 {
 public:
-  void reinforce(std::istringstream &is);
+  void   reinforce(std::istringstream &is);
 
 private:
-  void   make_value(const std::string &record_file_name, const std::string &out_file_name);
   void   update_param(const std::string &record_file_name, int num_threads);
-  void   update_value(std::vector<PositionData> &position_list);
+  void   compute_gradient(std::vector<PositionData> &position_list);
   size_t read_file(std::ifstream &ifs, std::vector<PositionData> &position_list, size_t num_positions, bool &eof);
   void   add_param(const Gradient &param);
-  Value  search(Position &pos, Depth depth);
+  void   load_param();
+  void   save_param();
 
   std::vector<std::string>               game_list_;
   std::vector<Position>                  positions_;
   std::vector<std::unique_ptr<Gradient>> gradients_;
-  uint64_t                               all_diff_;
+  double                                 all_diff_;
 };
 
 #endif

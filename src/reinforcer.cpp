@@ -17,21 +17,33 @@
 */
 
 #include <omp.h>
+#include <random>
+#include <iterator>
 #include "reinforcer.h"
 #include "transposition_table.h"
 #include "thread.h"
+#include "usi.h"
 
-constexpr Depth kSearchDepth = Depth(6);
-constexpr int   kDiffMargin  = 128;
-constexpr int   kBatchSize   = 100000;
+// ミニバッチのサイズ
+// この数の局面ごとにパラメーターを更新する
+constexpr int
+kBatchSize   = 1000000;
+
+// 評価値から勝率に変換する
+// 実測値では1 / (1 + exp(-v/558))が当てはまりがよいが、Ponanza方式に合わせる
+double
+win_rate(Value value)
+{
+  return 1.0 / (1.0 + std::exp(-static_cast<double>(value) / 600.0));
+}
 
 void
-Gradient::increment(const Position & pos, int step)
+Gradient::increment(const Position & pos, double delta)
 {
   const Square bk = pos.square_king(kBlack);
   const Square wk = pos.square_king(kWhite);
-  const int *list_black = pos.black_kpp_list();
-  const int *list_white = pos.white_kpp_list();
+  const Eval::KPPIndex *list_black = pos.black_kpp_list();
+  const Eval::KPPIndex *list_white = pos.white_kpp_list();
 
   for (int i = 0; i < Eval::kListNum; ++i)
   {
@@ -42,9 +54,9 @@ Gradient::increment(const Position & pos, int step)
       const int l0 = list_black[j];
       const int l1 = list_white[j];
       KppIndex bi(bk, k0, l0);
-      kpp[bi.king][bi.i][bi.j] += step;
+      kpp[bi.king][bi.i][bi.j] += delta;
       KppIndex wi(Eval::inverse(wk), k1, l1);
-      kpp[wi.king][wi.i][wi.j] -= step;
+      kpp[wi.king][wi.i][wi.j] -= delta;
     }
     KingPosition bksq(bk);
     BoardPosition wksq(wk);
@@ -63,8 +75,32 @@ Gradient::increment(const Position & pos, int step)
     {
       pi = lower_file_kpp_index(pi);
     }
-    kkp[bksq.square()][wksq.square()][pi] += step;
-    kkpt[bksq.square()][wksq.square()][pi][pos.side_to_move()] += step;
+    kkpt[bksq.square()][wksq.square()][pi][pos.side_to_move()] += delta;
+    kkp[bksq.square()][wksq.square()][pi] += delta;
+
+    Square inv_bk = Eval::inverse(wk);
+    Square inv_wk = Eval::inverse(bk);
+    int inv_k0 = inverse_black_white_kpp_index(k0);
+    KingPosition inv_bksq(inv_bk);
+    BoardPosition inv_wksq(inv_wk);
+    int inv_pi = inv_k0;
+    if (inv_bksq.swap)
+    {
+      inv_wksq.x = kFile9 - inv_wksq.x;
+      inv_pi = inverse_file_kpp_index(inv_pi);
+    }
+    else if (inv_bksq.x == kFile5 && inv_wksq.x > kFile5)
+    {
+      inv_wksq.x = kFile9 - inv_wksq.x;
+      inv_pi = lower_file_kpp_index(inv_pi);
+    }
+    else if (inv_bksq.x == kFile5 && inv_wksq.x == kFile5)
+    {
+      inv_pi = lower_file_kpp_index(inv_pi);
+    }
+
+    kkpt[inv_bksq.square()][inv_wksq.square()][inv_pi][~pos.side_to_move()] -= delta;
+    kkp[inv_bksq.square()][inv_wksq.square()][inv_pi] -= delta;
   }
 }
 
@@ -108,7 +144,7 @@ void
 Reinforcer::reinforce(std::istringstream &is)
 {
   std::string record_file_name;
-  int num_threads;
+  int num_threads = 1;
   std::string type;
 
   is >> type;
@@ -134,77 +170,21 @@ Reinforcer::reinforce(std::istringstream &is)
   omp_set_num_threads(num_threads);
 #endif
 
-  if (type == "make")
-    make_value(record_file_name, "out.txt");
-  else if (type == "update")
-    update_param(record_file_name, num_threads);
+  update_param(record_file_name, num_threads);
 }
 
-void
-Reinforcer::make_value(const std::string &record_file_name, const std::string &out_file_name)
-{
-  std::vector<PositionData> position_list;
-  std::ifstream ifs(record_file_name.c_str());
-  std::ofstream ofs(out_file_name.c_str());
-  bool eof = false;
-  uint64_t count = 0;
-
-  while (!eof)
-  {
-    read_file(ifs, position_list, 10000, eof);
-    Search::clear();
-#ifdef _OPENMP
-#pragma omp parallel for schedule(dynamic)
-#endif
-    for (int i = 0; i < static_cast<int>(position_list.size()); ++i)
-    {
-      PositionData &data = position_list[i];
-      int thread_id = 0;
-#ifdef _OPENMP
-      thread_id = omp_get_thread_num();
-#endif
-      positions_[thread_id].set(data.sfen, Threads[thread_id + 1]);
-      if (!positions_[thread_id].validate())
-      {
-        std::cout << "invalid pos" << std::endl;
-        data.value = 0;
-        continue;
-      }
-      data.value = static_cast<int>(search(positions_[thread_id], kSearchDepth));
-    }
-
-    ++count;
-    if (count % 500 == 0)
-      std::cout << count << std::endl;
-    else if (count % 100 == 0)
-      std::cout << "o" << std::flush;
-    else if (count % 10 == 0)
-      std::cout << "." << std::flush;
-
-    for (auto &data : position_list)
-    {
-      if (data.value != 0 && data.value > -2000 && data.value < 2000)
-        ofs << data.sfen << "," << data.value << std::endl;
-    }
-    position_list.clear();
-  }
-}
-
+// 局面ファイルから勾配を計算し、評価関数パラメーターを更新する
 void
 Reinforcer::update_param(const std::string &record_file_name, int num_threads)
 {
-  std::ifstream ifs2("new_fv2.bin", std::ios::in | std::ios::binary);
-  if (ifs2)
-  {
-    ifs2.read(reinterpret_cast<char *>(Eval::KPP), sizeof(Eval::KPP));
-    ifs2.read(reinterpret_cast<char *>(Eval::KKP), sizeof(Eval::KKP));
-    ifs2.read(reinterpret_cast<char *>(Eval::KKPT), sizeof(Eval::KKPT));
-    ifs2.close();
-  }
+  load_param();
 
   all_diff_ = 0;
   for (int i = 0; i < num_threads; ++i)
     gradients_.push_back(std::unique_ptr<Gradient>(new Gradient));
+
+  for (auto &g : gradients_)
+    g->clear();
 
   std::vector<PositionData> position_list;
   std::ifstream ifs(record_file_name.c_str());
@@ -217,7 +197,8 @@ Reinforcer::update_param(const std::string &record_file_name, int num_threads)
     if (position_list.empty())
       break;
 
-    update_value(position_list);
+    TT.clear();
+    compute_gradient(position_list);
     for (int i = 1; i < num_threads; ++i)
       *gradients_[0] += *gradients_[i];
     position_list.clear();
@@ -228,25 +209,16 @@ Reinforcer::update_param(const std::string &record_file_name, int num_threads)
     for (auto &g : gradients_)
       g->clear();
     if (count % 100 == 0)
-    {
-      std::ofstream fs("new_fv2.bin", std::ios::binary);
-      fs.write(reinterpret_cast<char *>(Eval::KPP), sizeof(Eval::KPP));
-      fs.write(reinterpret_cast<char *>(Eval::KKP), sizeof(Eval::KKP));
-      fs.write(reinterpret_cast<char *>(Eval::KKPT), sizeof(Eval::KKPT));
-      fs.close();
-    }
+      save_param();
   }
-  std::ofstream fs("new_fv2.bin", std::ios::binary);
-  fs.write(reinterpret_cast<char *>(Eval::KPP), sizeof(Eval::KPP));
-  fs.write(reinterpret_cast<char *>(Eval::KKP), sizeof(Eval::KKP));
-  fs.write(reinterpret_cast<char *>(Eval::KKPT), sizeof(Eval::KKPT));
-  fs.close();
+
+  save_param();
 }
 
+// 勾配を計算する
 void
-Reinforcer::update_value(std::vector<PositionData> &position_list)
+Reinforcer::compute_gradient(std::vector<PositionData> &position_list)
 {
-// 4スレッドくらいまでしか有効に使えないけど、ひとまずこのまま
 #ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic)
 #endif
@@ -257,9 +229,8 @@ Reinforcer::update_value(std::vector<PositionData> &position_list)
 #ifdef _OPENMP
     thread_id = omp_get_thread_num();
 #endif
-    int diff = 0;
 
-    if (data.value < -2000 || data.value > 2000 || data.value == 0)
+    if (data.value < -2000 || data.value > 2000 || data.value == kValueZero)
       continue;
 
     positions_[thread_id].set(data.sfen, Threads[thread_id + 1]);
@@ -270,35 +241,60 @@ Reinforcer::update_value(std::vector<PositionData> &position_list)
     std::memset(ss - 2, 0, 5 * sizeof(SearchStack));
     ss->pv = pv;
     StateInfo state[20];
-    Value quiet_value;
-    quiet_value = Search::qsearch(positions_[thread_id], ss, -kValueInfinite, kValueInfinite);
-    diff = data.value - quiet_value;
+    Value quiet_value =
+      Search::qsearch(positions_[thread_id], ss, -kValueInfinite, kValueInfinite);
+    // 局面データに記録した評価値から換算した勝率と局面の静止探索の評価値から換算した勝率の差をとる
+    double delta_value = win_rate(data.value) - win_rate(quiet_value);
 
+    // 最終的な勝敗と局面の静止探索の評価値から換算した勝率の差をとる
+    // 1.0ではなく2000点での勝率を使うとか、現在価値で割り引くとかやったほうがいいかもしれない
     Color root_color = positions_[thread_id].side_to_move();
-    int step = 0;
-    if (diff > kDiffMargin)
-      step = (root_color == kBlack) ? 1 : -1;
-    else if (diff < -kDiffMargin)
-      step = (root_color == kBlack) ? -1 : 1;
-
-    if (step != 0)
+    double delta_win = 0;
+    if (root_color == kBlack)
     {
-      int j = 0;
-      while (pv[j] != kMoveNone)
+      if (data.win == kBlack)
       {
-        positions_[thread_id].do_move(pv[j], state[j]);
-        ++j;
+        delta_win = 1.0 - win_rate(quiet_value);
       }
-      gradients_[thread_id]->increment(positions_[thread_id], step);
+      else if (data.win == kWhite)
+      {
+        delta_win = 0.0 - win_rate(quiet_value);
+      }
     }
+    else
+    {
+      if (data.win == kWhite)
+      {
+        delta_win = 1.0 - win_rate(quiet_value);
+      }
+      else if (data.win == kBlack)
+      {
+        delta_win = 0.0 - win_rate(quiet_value);
+      }
+    }
+
+    double delta = delta_win + delta_value;
+    if (root_color == kWhite)
+      delta = -delta;
+
+    int j = 0;
+    while (pv[j] != kMoveNone)
+    {
+      positions_[thread_id].do_move(pv[j], state[j]);
+      ++j;
+    }
+    gradients_[thread_id]->increment(positions_[thread_id], delta);
 
 #ifdef _OPENMP
 #pragma omp critical
 #endif
-    all_diff_ += diff * diff;
+    {
+      all_diff_ += delta * delta;
+    }
   }
 }
 
+// 局面データから読み込む
 size_t
 Reinforcer::read_file(std::ifstream &ifs, std::vector<PositionData> &position_list, size_t num_positions, bool &eof)
 {
@@ -324,16 +320,28 @@ Reinforcer::read_file(std::ifstream &ifs, std::vector<PositionData> &position_li
     std::string value;
     std::getline(stream, value, ',');
     if (value.empty())
-      data.value = 0;
+      data.value = kValueZero;
     else
-      data.value = std::stoi(value);
+      data.value = static_cast<Value>(std::stoi(value));
+
+    std::string win;
+    std::getline(stream, win, ',');
+    if (win == "b")
+      data.win = kBlack;
+    else if (win == "w")
+      data.win = kWhite;
+    else
+      data.win = kNumberOfColor;
+
     position_list.push_back(data);
     ++num;
   }
   return num;
 }
 
-void Reinforcer::add_param(const Gradient &param)
+// 勾配からパラメーターを更新する
+void
+Reinforcer::add_param(const Gradient &param)
 {
 #ifdef _OPENMP
 #pragma omp parallel
@@ -399,13 +407,17 @@ void Reinforcer::add_param(const Gradient &param)
 
           if (param.kkp[ksq0.square()][ksq1.square()][pi] > 0)
           {
-            if (Eval::KKP[k0][k1][i] < INT16_MAX)
-              Eval::KKP[k0][k1][i] += 1;
+            if (Eval::KKPT[k0][k1][i][0] < INT16_MAX)
+              Eval::KKPT[k0][k1][i][0] += 1;
+            if (Eval::KKPT[k0][k1][i][1] < INT16_MAX)
+              Eval::KKPT[k0][k1][i][1] += 1;
           }
           else if (param.kkp[ksq0.square()][ksq1.square()][pi] < 0)
           {
-            if (Eval::KKP[k0][k1][i] > INT16_MIN)
-              Eval::KKP[k0][k1][i] -= 1;
+            if (Eval::KKPT[k0][k1][i][0] > INT16_MIN)
+              Eval::KKPT[k0][k1][i][0] -= 1;
+            if (Eval::KKPT[k0][k1][i][1] > INT16_MIN)
+              Eval::KKPT[k0][k1][i][1] -= 1;
           }
 
           if (param.kkpt[ksq0.square()][ksq1.square()][pi][0] > 0)
@@ -435,29 +447,25 @@ void Reinforcer::add_param(const Gradient &param)
   }
 }
 
-Value
-Reinforcer::search(Position &pos, Depth depth)
+void
+Reinforcer::load_param()
 {
-  SearchStack stack[kMaxPly + 4];
-  SearchStack *ss = stack + 2;
-  std::memset(ss - 2, 0, 5 * sizeof(SearchStack));
-
-  StateInfo new_info;
-  Thread *thread = pos.this_thread();
-
-  thread->history_.clear();
-  thread->counter_moves_.clear();
-  thread->counter_move_history_.clear();
-  thread->from_to_.clear();
-  thread->pv_index_ = 0;
-  thread->calls_count_ = 0;
-  thread->max_ply_ = 0;
-  thread->root_depth_ = kDepthZero;
-
-  thread->root_moves_.clear();
-  for (auto &m : MoveList<kLegalForSearch>(pos))
-    thread->root_moves_.push_back(Search::RootMove(m.move));
-
-  return Search::search(pos, ss, -kValueInfinite, kValueInfinite, depth);
+  std::ifstream ifs2("new_fv2.bin", std::ios::in | std::ios::binary);
+  if (ifs2)
+  {
+    ifs2.read(reinterpret_cast<char *>(Eval::KPP), sizeof(Eval::KPP));
+    ifs2.read(reinterpret_cast<char *>(Eval::KKPT), sizeof(Eval::KKPT));
+    ifs2.close();
+  }
 }
+
+void
+Reinforcer::save_param()
+{
+  std::ofstream fs("new_fv2.bin", std::ios::binary);
+  fs.write(reinterpret_cast<char *>(Eval::KPP), sizeof(Eval::KPP));
+  fs.write(reinterpret_cast<char *>(Eval::KKPT), sizeof(Eval::KKPT));
+  fs.close();
+}
+
 

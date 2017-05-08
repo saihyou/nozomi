@@ -55,11 +55,11 @@ struct StateInfo
   int material;
   int pilies_from_null;
   int continuous_checks[kNumberOfColor];
-  int kpp_list_index[kSquareHand];
-  int black_kpp_list[Eval::kListNum];
-  int white_kpp_list[Eval::kListNum];
-  int list_index_move;
-  int list_index_capture;
+  uint8_t  kpp_list_index[kSquareHand];
+  Eval::KPPIndex black_kpp_list[Eval::kListNum];
+  Eval::KPPIndex white_kpp_list[Eval::kListNum];
+  uint8_t list_index_move;
+  uint8_t list_index_capture;
 
   uint64_t board_key;
   uint64_t hand_key;
@@ -170,12 +170,10 @@ public:
   key_after(Move m) const;
   int 
   material() const;
-  Value 
-  see(Move move) const;
-  Value 
-  see_sign(Move m) const;
-  Value
-  see_reverse_move(Move move) const;
+  bool
+  see_ge(Move m, Value v) const;
+  bool
+  see_ge_reverse_move(Move m, Value v) const;
 
   Repetition 
   in_repetition() const;
@@ -184,17 +182,17 @@ public:
   int 
   continuous_checks(Color c) const;
 
-  int *
+  Eval::KPPIndex *
   black_kpp_list() const;
-  int *
+  Eval::KPPIndex *
   white_kpp_list() const;
-  int *
+  Eval::KPPIndex *
   prev_black_kpp_list() const;
-  int *
+  Eval::KPPIndex *
   prev_white_kpp_list() const;
-  int
+  uint8_t
   list_index_capture() const;
-  int
+  uint8_t
   list_index_move() const;
 
   void
@@ -229,8 +227,8 @@ private:
   is_pawn_exist(Square sq, Color color) const;
   BitBoard
   check_blockers(Color c, Color king_color, const BitBoard &occupied) const;
-  Value
-  see(Move move, Color move_color) const;
+  bool
+  see_ge(Move m, Value v, Color c) const;
  
   BitBoard   piece_board_[kNumberOfColor][kPieceTypeMax];
   Hand       hand_[kNumberOfColor];
@@ -244,23 +242,23 @@ private:
   Thread    *this_thread_;
 };
 
-inline Value
-Position::see(Move move) const
+inline bool
+Position::see_ge(Move m, Value v) const
 {
-  return see(move, side_to_move_);
+  return see_ge(m, v, side_to_move_);
 }
 
-inline Value
-Position::see_reverse_move(Move move) const
+inline bool
+Position::see_ge_reverse_move(Move m, Value v) const
 {
-  const Square to = move_from(move);
+  const Square to = move_from(m);
   if (to >= kBoardSquare)
-    return kValueZero;
+    return v >= kValueZero;
 
-  const Square from = move_to(move);
+  const Square from = move_to(m);
   // 本来ならcaptureも考慮すべきかもだけどnon captureの場面でしか呼ばれないので無視する
-  return see(move_init(from, to, move_piece_type(move), kPieceNone, false), ~side_to_move_);
-} 
+  return see_ge(move_init(from, to, move_piece_type(m), kPieceNone, false), v, ~side_to_move_);
+}
 
 inline int
 Position::continuous_checks(Color c) const
@@ -464,37 +462,37 @@ Position::legal(Move m, BitBoard &pinned) const
   return !pinned.test() || !((pinned & MaskTable[from]).test()) || aligned(from, to, square_king_[side_to_move_]);
 }
 
-inline int *
+inline Eval::KPPIndex *
 Position::black_kpp_list() const
 {
   return state_->black_kpp_list;
 }
 
-inline int *
+inline Eval::KPPIndex *
 Position::white_kpp_list() const
 {
   return state_->white_kpp_list;
 }
 
-inline int *
+inline Eval::KPPIndex *
 Position::prev_black_kpp_list() const
 {
   return state_->previous->black_kpp_list;
 }
 
-inline int *
+inline Eval::KPPIndex *
 Position::prev_white_kpp_list() const
 {
   return state_->previous->white_kpp_list;
 }
 
-inline int
+inline uint8_t
 Position::list_index_capture() const
 {
   return state_->list_index_capture;
 }
 
-inline int
+inline uint8_t
 Position::list_index_move() const
 {
   return state_->list_index_move;

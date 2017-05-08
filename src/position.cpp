@@ -202,6 +202,7 @@ Position::set(const std::string &sfen, Thread *t)
       if (is_promote)
         piece = piece + kFlagPromoted;
       put_piece(piece, static_cast<Square>(sq));
+
       sq++;
       is_promote = false;
     }
@@ -1117,90 +1118,90 @@ min_attacker<13>
   return kKing;
 }
 
-Value 
-Position::see_sign(Move m) const
+bool
+Position::see_ge(Move m, Value v, Color c) const
 {
-  Square from = move_from(m);
-  PieceType t = move_piece_type(m);
-  if (move_is_promote(m))
-    t = t + kFlagPromoted;
-  if 
-  (
-    from < kBoardSquare
-    &&
-    ExchangePieceValueTable[move_piece_type(m)] <= ExchangePieceValueTable[move_capture(m)]
-  )
-    return kValueKnownWin;
-
-  return see(m);
-}
-
-Value 
-Position::see(Move move, Color move_color) const
-{
-  Square   to       = move_to(move);
-  Square   from     = move_from(move);
-  Color    side     = ~move_color;
-  BitBoard occupied = this->occupied();
-  BitBoard defender;
-  BitBoard attackers;
-  PieceType piece = move_piece_type(move);
-  int swap_list[32];
+  Square    to = move_to(m);
+  Square    from = move_from(m);
+  PieceType next_victim;
+  Color     side_to_move = ~c;
+  BitBoard  occupied = this->occupied();
+  Value     balance;
+  BitBoard  side_to_move_attackers;
+  BitBoard  attackers;
 
   if (from < kBoardSquare)
   {
     occupied.xor_bit(from);
-    defender = attacks_to(to, side, occupied);
-    if (!defender.test())
-    {
-      if (move_is_promote(move))
-        return static_cast<Value>(ExchangePieceValueTable[move_capture(move)] + PromotePieceValueTable[piece]);
-      
-      return static_cast<Value>(ExchangePieceValueTable[move_capture(move)]);
-    }
-    attackers = defender | attacks_to(to, side_to_move_, occupied);
-    swap_list[0] = ExchangePieceValueTable[move_capture(move)];
-    if (move_is_promote(move))
-    {
-      swap_list[0] += PromotePieceValueTable[piece];
-      piece = piece + kFlagPromoted;
-    }
+    balance = static_cast<Value>(ExchangePieceValueTable[move_capture(m)]);
+    next_victim = move_piece_type(m);
+
+    if (balance < v)
+      return false;
+
+    if (next_victim == kKing)
+      return true;
+
+    attackers = attacks_to(to, side_to_move, occupied);
+    if (!attackers.test())
+      return true;
+
+    balance -= static_cast<Value>(ExchangePieceValueTable[next_victim]);
+
+    if (balance >= v)
+      return true;
   }
   else
   {
-    defender = attacks_to(to, side, occupied);
-    if (!defender.test())
-      return kValueZero;
-    piece = to_drop_piece_type(from);
-    attackers = defender | attacks_to(to, side_to_move_, occupied);
-    swap_list[0] = kValueZero;
-  }
+    next_victim = to_drop_piece_type(from);
+    balance = kValueZero;
+    if (balance < v)
+      return false;
 
-  int index = 1;
-  do
+    attackers = attacks_to(to, side_to_move, occupied);
+    if (!attackers.test())
+      return true;
+
+    balance -= static_cast<Value>(ExchangePieceValueTable[next_victim]);
+
+    if (balance >= v)
+      return true;
+
+    occupied.xor_bit(to);
+  }
+  attackers = (attackers | attacks_to(to, ~side_to_move, occupied)) & occupied;
+
+  bool relative_side_to_move = true;
+
+  while (true)
   {
-    swap_list[index] = -swap_list[index - 1] + ExchangePieceValueTable[piece];
-    piece = min_attacker<0>(this, to, side, defender, attackers, occupied);
-    attackers &= occupied;
-    ++index;
-    side = ~side;
-    defender = attackers & piece_board_[side][kOccupied];
-    if (piece == kKing)
-    {
-      // 王が取ることができない場合
-      if (defender.test())
-        swap_list[index++] = Eval::kKingValue;
+    side_to_move_attackers = attackers & piece_board_[side_to_move][kOccupied];
+#if 0
+    if (!(state_->pinners_for_king[side_to_move] & ~occupied).test())
+      side_to_move_attackers &= ~state_->pinners_for_king[side_to_move];
+#endif
+    if (!side_to_move_attackers.test())
+      return relative_side_to_move;
 
-      break;
-    }
+    next_victim = min_attacker<0>(this, to, side_to_move, side_to_move_attackers, attackers, occupied);
+
+    if (next_victim == kKing)
+      return relative_side_to_move == (attackers & piece_board_[~side_to_move][kOccupied]).test();
+
+    balance += relative_side_to_move
+      ?
+      ExchangePieceValueTable[next_victim]
+      :
+      -ExchangePieceValueTable[next_victim];
+
+    relative_side_to_move = !relative_side_to_move;
+    if (relative_side_to_move == (balance >= v))
+      return relative_side_to_move;
+
+    side_to_move = ~side_to_move;
   }
-  while (defender.test());
-  
-  while (--index)
-    swap_list[index - 1] = std::min(-swap_list[index], swap_list[index - 1]);
-
-  return static_cast<Value>(swap_list[0]);
 }
+
 
 uint64_t
 Position::key_after(Move m) const
@@ -1354,11 +1355,11 @@ Position::is_decralation_win() const
   BitBoard large_pieces = piece_board_[us][kBishop] | piece_board_[us][kRook] | piece_board_[us][kDragon] | piece_board_[us][kHorse];
   BitBoard small_pieces = (piece_board_[us][kOccupied] ^ piece_board_[us][kKing]);
   small_pieces.not_and(large_pieces);
+  large_pieces &= PromotableMaskTable[us];
+  small_pieces &= PromotableMaskTable[us];
 
   int large_score =
     static_cast<int>(large_pieces.popcount())
-    +
-    number_of(hand_[us], kBishop)
     +
     number_of(hand_[us], kBishop)
     +

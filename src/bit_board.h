@@ -85,6 +85,13 @@ DirectionTable[kBoardSquare][kBoardSquare];
 extern BitBoard
 BetweenTable[kBoardSquare][kBoardSquare];
 
+extern BitBoard
+PawnDropableTable[512][kNumberOfColor];
+extern const BitBoard
+KnightDropableMaskTable[kNumberOfColor];
+extern const BitBoard
+LanceDropableMaskTable[kNumberOfColor];
+
 extern const BitBoard
 PromotableMaskTable[kNumberOfColor];
 extern const BitBoard

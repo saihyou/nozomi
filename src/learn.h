@@ -53,8 +53,8 @@ struct RawEvaluater
   {
     const Square black_king = pos.square_king(kBlack);
     const Square white_king = pos.square_king(kWhite);
-    const int *list_black = pos.black_kpp_list();
-    const int *list_white = pos.white_kpp_list();
+    const Eval::KPPIndex *list_black = pos.black_kpp_list();
+    const Eval::KPPIndex *list_white = pos.white_kpp_list();
     const float param = static_cast<float>(d / Eval::kFvScale);
     for (int i = 0; i < Eval::kListNum; ++i)
     {
@@ -359,4 +359,8 @@ private:
   int64_t  update_mask_;
   std::mt19937_64 mt64_;
 };
+
+int
+inverse_black_white_kpp_index(int i);
+
 #endif

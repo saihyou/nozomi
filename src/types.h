@@ -318,4 +318,12 @@ is_ok(Square s)
   return s >= k9A && s <= k1I;
 }
 
+inline int
+rank_distance(Square s1, Square s2)
+{
+  int r1 = s1 / 9;
+  int r2 = s2 / 9;
+  return (r1 > r2) ? r1 - r2 : r2 - r1;
+}
+
 #endif

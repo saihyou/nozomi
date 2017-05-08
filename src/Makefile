@@ -1,20 +1,25 @@
 OBJS = bit_board.o move_generator.o position.o usi.o usioption.o misc.o thread.o timeman.o transposition_table.o move_picker.o evaluate.o search.o benchmark.o book.o main.o
 
-CPPFLAGS = -Wall -std=c++11 -DHAVE_SSE4 -msse4 -mbmi2
+CPPFLAGS = -Wall -std=c++11 -DHAVE_SSE4 -march=native
 LDFLAGS = -pthread
 
 ifdef DEBUG
 CPPFLAGS += -g
 else
-CPPFLAGS += -O3 -DNDEBUG
+CPPFLAGS += -Ofast -DNDEBUG
 endif
 
 ifdef LEARN
 CPPFLAGS += -fopenmp -DLEARN
-OBJS += learn.o reinforcer.o
+OBJS += learn.o reinforcer.o kifu_maker.o
 LDFLAGS += -fopenmp
 endif
 
+ifdef UPDATE
+CPPFLAGS += -fopenmp -DLEARN -DDISABLE_TT
+OBJS += learn.o reinforcer.o kifu_maker.o
+LDFLAGS += -fopenmp
+endif
 
 nozomi: $(OBJS)
 	$(CXX) $^ $(LDFLAGS) -o $@

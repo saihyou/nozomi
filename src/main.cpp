@@ -28,6 +28,7 @@
 #include "book.h"
 #include "learn.h"
 #include "reinforcer.h"
+#include "kifu_maker.h"
 
 int
 main(int argc, char* argv[]) 
@@ -65,8 +66,12 @@ main(int argc, char* argv[])
   }
   else if (type == "reinforce")
   {
-    std::unique_ptr<Reinforcer> leinforcer(new Reinforcer);
-    leinforcer->reinforce(is);
+    std::unique_ptr<Reinforcer> reinforcer(new Reinforcer);
+    reinforcer->reinforce(is);
+  }
+  else if (type == "kifu")
+  {
+    KifuMaker::make(is);
   }
 #endif
   Threads.exit();

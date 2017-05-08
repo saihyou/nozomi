@@ -79,17 +79,12 @@ generate_pawn(const Position &pos, const BitBoard &movable, ExtMove *move)
   return move;
 }
 
+template<bool discover_check>
 ExtMove *
 generate_pawn_check(const Position &pos, const BitBoard &movable, const CheckInfo &ci, ExtMove *move)
 {
   Color color = pos.side_to_move();
   const BitBoard target = pawn_attack(color, pos.pieces(kPawn, color)) & movable;
-  const bool discover_check =
-    (
-      ci.discover_check_candidates.test()
-      &&
-      (ci.discover_check_candidates & pos.pieces(kPawn, color)).test()
-    );
 
   BitBoard promotable = target & PromotableMaskTable[color];
   while (promotable.test())
@@ -190,17 +185,12 @@ generate_lance(const Position &pos, const BitBoard &movable, ExtMove *move)
   return move;
 }
 
+template<bool discover_check>
 ExtMove *
 generate_lance_check(const Position &pos, const BitBoard &movable, const CheckInfo &ci, ExtMove *move)
 {
   Color color = pos.side_to_move();
   BitBoard piece = pos.pieces(kLance, color);
-  const bool discover_check =
-    (
-      ci.discover_check_candidates.test()
-      &&
-      (ci.discover_check_candidates & piece).test()
-    );
 
   while (piece.test())
   {
@@ -293,17 +283,12 @@ generate_knight(const Position &pos, const BitBoard &movable, ExtMove *move)
   return move;
 }
 
+template<bool discover_check>
 ExtMove *
 generate_knight_check(const Position &pos, const BitBoard &movable, const CheckInfo &ci, ExtMove *move)
 {
   Color color = pos.side_to_move();
   BitBoard piece = pos.pieces(kKnight, color);
-  const bool discover_check =
-    (
-      ci.discover_check_candidates.test()
-      &&
-      (ci.discover_check_candidates & piece).test()
-    );
 
   while (piece.test())
   {
@@ -389,17 +374,12 @@ generate_silver(const Position &pos, const BitBoard &movable, ExtMove *move)
   return move;
 }
 
+template<bool discover_check>
 ExtMove *
 generate_silver_check(const Position &pos, const BitBoard &movable, const CheckInfo &ci, ExtMove *move)
 {
   Color color = pos.side_to_move();
   BitBoard piece = pos.pieces(kSilver, color);
-  const bool discover_check =
-    (
-      ci.discover_check_candidates.test()
-      &&
-      (ci.discover_check_candidates & piece).test()
-    );
 
   while (piece.test())
   {
@@ -495,17 +475,12 @@ generate_total_gold(const Position &pos, const BitBoard &movable, ExtMove *move)
   return move;
 }
 
+template<bool discover_check>
 ExtMove *
 generate_total_gold_check(const Position &pos, const BitBoard &movable, const CheckInfo &ci, ExtMove *move)
 {
   Color color = pos.side_to_move();
   BitBoard piece = pos.total_gold(color);
-  const bool discover_check =
-    (
-      ci.discover_check_candidates.test()
-      &&
-      (ci.discover_check_candidates & piece).test()
-    );
 
   while (piece.test())
   {
@@ -641,17 +616,12 @@ generate_bishop(const Position &pos, const BitBoard &movable, ExtMove *move)
   return move;
 }
 
+template<bool discover_check>
 ExtMove *
 generate_bishop_check(const Position &pos, const BitBoard &movable, const CheckInfo &ci, ExtMove *move)
 {
   Color color = pos.side_to_move();
   BitBoard piece = pos.pieces(kBishop, color);
-  const bool discover_check =
-    (
-      ci.discover_check_candidates.test()
-      &&
-      (ci.discover_check_candidates & piece).test()
-    );
 
   while (piece.test())
   {
@@ -745,17 +715,12 @@ generate_rook(const Position &pos, const BitBoard &movable, ExtMove *move)
   return move;
 }
 
+template<bool discover_check>
 ExtMove *
 generate_rook_check(const Position &pos, const BitBoard &movable, const CheckInfo &ci, ExtMove *move)
 {
   Color color = pos.side_to_move();
   BitBoard piece = pos.pieces(kRook, color);
-  const bool discover_check =
-    (
-      ci.discover_check_candidates.test()
-      &&
-      (ci.discover_check_candidates & piece).test()
-    );
 
   while (piece.test())
   {
@@ -832,17 +797,12 @@ generate_horse(const Position &pos, const BitBoard &movable, ExtMove *move)
   return move;
 }
 
+template<bool discover_check>
 ExtMove *
 generate_horse_check(const Position &pos, const BitBoard &movable, const CheckInfo &ci, ExtMove *move)
 {
   Color color = pos.side_to_move();
   BitBoard piece = pos.pieces(kHorse, color);
-  const bool discover_check =
-    (
-      ci.discover_check_candidates.test()
-      &&
-      (ci.discover_check_candidates & piece).test()
-    );
 
   while (piece.test())
   {
@@ -907,17 +867,12 @@ generate_dragon(const Position &pos, const BitBoard &movable, ExtMove *move)
   return move;
 }
 
+template<bool discover_check>
 ExtMove *
 generate_dragon_check(const Position &pos, const BitBoard &movable, const CheckInfo &ci, ExtMove *move)
 {
   Color color = pos.side_to_move();
   BitBoard piece = pos.pieces(kDragon, color);
-  const bool discover_check =
-    (
-      ci.discover_check_candidates.test()
-      &&
-      (ci.discover_check_candidates & piece).test()
-    );
 
   while (piece.test())
   {
@@ -966,20 +921,11 @@ ExtMove *
 generate_drop_pawn(const Position &pos, const BitBoard &bb, ExtMove *move)
 {
   Color color = pos.side_to_move();
-  BitBoard target = bb;
   const BitBoard pawn = pos.pieces(kPawn, color);
-  const uint64_t mask_file1 = (1ULL << 54 | 1ULL << 45 | 1ULL << 36 | 1ULL << 27 |1ULL << 18 | 1ULL << 9 | 1U);
-  const uint64_t pawn_exist = pawn.to_uint64();
-  for (int i = 0; i < 9; i++)
-  {
-    if (pawn_exist & (mask_file1 << i))
-      target.not_and(FileMaskTable[i]);
-  }
-  if (color == kBlack)
-    target.not_and(RankMaskTable[kRank1]);
-  else
-    target.not_and(RankMaskTable[kRank9]);
-
+  const uint64_t p = pawn.to_uint64();
+  const uint64_t b = 0x1FF;
+  uint64_t pawn_exist = (p & b) | ((p >> 9) & b) | ((p >> 18) & b) | ((p >> 27) & b) | ((p >> 36) & b) | ((p >> 45) & b) | ((p >> 54) & b);
+  BitBoard target = bb & PawnDropableTable[pawn_exist][color];
   Square to;
   while (target.test())
   {
@@ -1090,6 +1036,66 @@ generate_drop_rook(const Position &pos, const Square list[kBoardSquare], int tot
   return move;
 }
 
+template<PieceType type>
+ExtMove *
+generate_drop_one(const Position &pos, const BitBoard &bb, ExtMove *move)
+{
+  Color color = pos.side_to_move();
+  if (type == kLance)
+  {
+    BitBoard target = bb & LanceDropableMaskTable[color];
+    while (target.test())
+    {
+      Square sq = target.pop_bit();
+      move->move = move_init(sq, kLance);
+      ++move;
+    }
+  }
+  else if (type == kKnight)
+  {
+    BitBoard target = bb & KnightDropableMaskTable[color];
+    while (target.test())
+    {
+      Square sq = target.pop_bit();
+      move->move = move_init(sq, kKnight);
+      ++move;
+    }
+  } 
+  else
+  {
+    BitBoard target = bb;
+    while (target.test())
+    {
+      Square sq = target.pop_bit();
+      move->move = move_init(sq, type);
+      ++move;
+    }
+  }
+  return move;
+}
+
+ExtMove *
+generate_drop_many(const Position &pos, const BitBoard &bb, HandType piece_type, ExtMove *move)
+{
+  Square list[kBoardSquare];
+  int total_num;
+  make_dropable_list(bb, list, &total_num);
+
+  if (piece_type & kHandLanceExist)
+    move = generate_drop_lance(pos, list, total_num, move);
+  if (piece_type & kHandKnightExist)
+    move = generate_drop_knight(pos, list, total_num, move);
+  if (piece_type & kHandSilverExist)
+    move = generate_drop_silver(pos, list, total_num, move);
+  if (piece_type & kHandGoldExist)
+    move = generate_drop_gold(pos, list, total_num, move);
+  if (piece_type & kHandBishopExist)
+    move = generate_drop_bishop(pos, list, total_num, move);
+  if (piece_type & kHandRookExist)
+    move = generate_drop_rook(pos, list, total_num, move);
+  return move;
+}
+
 ExtMove *
 generate_drop(const Position &pos, const BitBoard &bb, ExtMove *move)
 {
@@ -1101,28 +1107,32 @@ generate_drop(const Position &pos, const BitBoard &bb, ExtMove *move)
   if (!has_hand_except_pawn(hand))
     return move;
 
-  Square list[kBoardSquare];
-  int total_num = 0;
+  HandType piece_type = extract_piece_without_pawn(hand);
 
-  make_dropable_list(bb, list, &total_num);
-
-  if (has_hand(hand, kLance))
-    move = generate_drop_lance(pos, list, total_num, move);
-
-  if (has_hand(hand, kKnight))
-    move = generate_drop_knight(pos, list, total_num, move);
-
-  if (has_hand(hand, kSilver))
-    move = generate_drop_silver(pos, list, total_num, move);
-
-  if (has_hand(hand, kGold))
-    move = generate_drop_gold(pos, list, total_num, move);
-
-  if (has_hand(hand, kBishop))
-    move = generate_drop_bishop(pos, list, total_num, move);
-
-  if (has_hand(hand, kRook))
-    move = generate_drop_rook(pos, list, total_num, move);
+  switch (piece_type)
+  {
+  case kHandLanceExist:
+    move = generate_drop_one<kLance>(pos, bb, move);
+    break;
+  case kHandKnightExist:
+    move = generate_drop_one<kKnight>(pos, bb, move);
+    break;
+  case kHandSilverExist:
+    move = generate_drop_one<kSilver>(pos, bb, move);
+    break;
+  case kHandGoldExist:
+    move = generate_drop_one<kGold>(pos, bb, move);
+    break;
+  case kHandBishopExist:
+    move = generate_drop_one<kBishop>(pos, bb, move);
+    break;
+  case kHandRookExist:
+    move = generate_drop_one<kRook>(pos, bb, move);
+    break;
+  default:
+    move = generate_drop_many(pos, bb, piece_type, move);
+    break;
+  }
 
   return move;
 }
@@ -1142,39 +1152,25 @@ generate_drop_check(const Position &pos, const BitBoard &bb, ExtMove *move)
   Square sq;
   if (has_hand(hand, kLance))
   {
-    dest = bb & lance_attack(pos.occupied(), ~color, pos.square_king(~color));
+    dest = 
+      bb & lance_attack(pos.occupied(), ~color, pos.square_king(~color)) & LanceDropableMaskTable[color];
     while (dest.test())
     {
       sq = dest.pop_bit();
-      if
-      (
-        (color == kBlack && sq > k1A)
-        ||
-        (color == kWhite && sq < k9I)
-      )
-      {
-        move->move = move_init(sq, kLance);
-        ++move;
-      }
+      move->move = move_init(sq, kLance);
+      ++move;
     }
   }
 
   if (has_hand(hand, kKnight))
   {
-    dest = bb & KnightAttacksTable[~color][pos.square_king(~color)];
+    dest =
+      bb & KnightAttacksTable[~color][pos.square_king(~color)] & KnightDropableMaskTable[color];
     while (dest.test())
     {
       sq = dest.pop_bit();
-      if
-      (
-        (color == kBlack && sq > k1B)
-        ||
-        (color == kWhite && sq < k9H)
-      )
-      {
-        move->move = move_init(sq, kKnight);
-        ++move;
-      }
+      move->move = move_init(sq, kKnight);
+      ++move;
     }
   }
 
@@ -1407,16 +1403,54 @@ generate<kChecks>(const Position &pos, ExtMove *move)
 
   target = ~pos.pieces(kOccupied, color);
 
-  move = generate_pawn_check(pos, target, ci, move);
-  move = generate_lance_check(pos, target, ci, move);
-  move = generate_knight_check(pos, target, ci, move);
-  move = generate_silver_check(pos, target, ci, move);
-  move = generate_total_gold_check(pos, target, ci, move);
-  move = generate_bishop_check(pos, target, ci, move);
-  move = generate_rook_check(pos, target, ci, move);
-  move = generate_horse_check(pos, target, ci, move);
-  move = generate_dragon_check(pos, target, ci, move);
-  move = generate_king_check(pos, target, ci, move);
+  if ((ci.discover_check_candidates & pos.pieces(kPawn, color)).test())
+    move = generate_pawn_check<true>(pos, target, ci, move);
+  else
+    move = generate_pawn_check<false>(pos, target, ci, move);
+
+  if ((ci.discover_check_candidates & pos.pieces(kLance, color)).test())
+    move = generate_lance_check<true>(pos, target, ci, move);
+  else
+    move = generate_lance_check<false>(pos, target, ci, move);
+
+  if ((ci.discover_check_candidates & pos.pieces(kKnight, color)).test())
+    move = generate_knight_check<true>(pos, target, ci, move);
+  else
+    move = generate_knight_check<false>(pos, target, ci, move);
+
+  if ((ci.discover_check_candidates & pos.pieces(kSilver, color)).test())
+    move = generate_silver_check<true>(pos, target, ci, move);
+  else
+    move = generate_silver_check<false>(pos, target, ci, move);
+
+  if ((ci.discover_check_candidates & pos.total_gold(color)).test())
+    move = generate_total_gold_check<true>(pos, target, ci, move);
+  else
+    move = generate_total_gold_check<false>(pos, target, ci, move);
+
+  if ((ci.discover_check_candidates & pos.pieces(kBishop, color)).test())
+    move = generate_bishop_check<true>(pos, target, ci, move);
+  else
+    move = generate_bishop_check<false>(pos, target, ci, move);
+
+  if ((ci.discover_check_candidates & pos.pieces(kRook, color)).test())
+    move = generate_rook_check<true>(pos, target, ci, move);
+  else
+    move = generate_rook_check<false>(pos, target, ci, move);
+
+  if ((ci.discover_check_candidates & pos.pieces(kHorse, color)).test())
+    move = generate_horse_check<true>(pos, target, ci, move);
+  else
+    move = generate_horse_check<false>(pos, target, ci, move);
+
+  if ((ci.discover_check_candidates & pos.pieces(kDragon, color)).test())
+    move = generate_dragon_check<true>(pos, target, ci, move);
+  else
+    move = generate_dragon_check<false>(pos, target, ci, move);
+
+  if ((ci.discover_check_candidates & pos.pieces(kKing, color)).test())
+    move = generate_king_check(pos, target, ci, move);
+  
   if (pos.hand(color) != kHandZero)
     move = generate_drop_check(pos, ~pos.occupied(), move);
   return move;
@@ -1426,19 +1460,58 @@ template <>
 ExtMove *
 generate<kQuietChecks>(const Position &pos, ExtMove *move)
 {
+  Color color = pos.side_to_move();
   BitBoard target = ~pos.occupied();
   CheckInfo ci(pos);
 
-  move = generate_pawn_check(pos, target, ci, move);
-  move = generate_lance_check(pos, target, ci, move);
-  move = generate_knight_check(pos, target, ci, move);
-  move = generate_silver_check(pos, target, ci, move);
-  move = generate_total_gold_check(pos, target, ci, move);
-  move = generate_bishop_check(pos, target, ci, move);
-  move = generate_rook_check(pos, target, ci, move);
-  move = generate_horse_check(pos, target, ci, move);
-  move = generate_dragon_check(pos, target, ci, move);
-  move = generate_king_check(pos, target, ci, move);
+  if ((ci.discover_check_candidates & pos.pieces(kPawn, color)).test())
+    move = generate_pawn_check<true>(pos, target, ci, move);
+  else
+    move = generate_pawn_check<false>(pos, target, ci, move);
+
+  if ((ci.discover_check_candidates & pos.pieces(kLance, color)).test())
+    move = generate_lance_check<true>(pos, target, ci, move);
+  else
+    move = generate_lance_check<false>(pos, target, ci, move);
+
+  if ((ci.discover_check_candidates & pos.pieces(kKnight, color)).test())
+    move = generate_knight_check<true>(pos, target, ci, move);
+  else
+    move = generate_knight_check<false>(pos, target, ci, move);
+
+  if ((ci.discover_check_candidates & pos.pieces(kSilver, color)).test())
+    move = generate_silver_check<true>(pos, target, ci, move);
+  else
+    move = generate_silver_check<false>(pos, target, ci, move);
+
+  if ((ci.discover_check_candidates & pos.total_gold(color)).test())
+    move = generate_total_gold_check<true>(pos, target, ci, move);
+  else
+    move = generate_total_gold_check<false>(pos, target, ci, move);
+
+  if ((ci.discover_check_candidates & pos.pieces(kBishop, color)).test())
+    move = generate_bishop_check<true>(pos, target, ci, move);
+  else
+    move = generate_bishop_check<false>(pos, target, ci, move);
+
+  if ((ci.discover_check_candidates & pos.pieces(kRook, color)).test())
+    move = generate_rook_check<true>(pos, target, ci, move);
+  else
+    move = generate_rook_check<false>(pos, target, ci, move);
+
+  if ((ci.discover_check_candidates & pos.pieces(kHorse, color)).test())
+    move = generate_horse_check<true>(pos, target, ci, move);
+  else
+    move = generate_horse_check<false>(pos, target, ci, move);
+
+  if ((ci.discover_check_candidates & pos.pieces(kDragon, color)).test())
+    move = generate_dragon_check<true>(pos, target, ci, move);
+  else
+    move = generate_dragon_check<false>(pos, target, ci, move);
+
+  if ((ci.discover_check_candidates & pos.pieces(kKing, color)).test())
+    move = generate_king_check(pos, target, ci, move);
+
   if (pos.hand(pos.side_to_move()) != kHandZero)
     move = generate_drop_check(pos, target, move);
 
@@ -1614,20 +1687,11 @@ search_drop_mate(Position &pos, const BitBoard &bb)
   else if (has_hand(hand, kLance))
   {
     // else ifなのは飛車で詰まない場合は香車でも詰まないから
-    dest = bb & PawnAttacksTable[~color][enemy];
+    dest = bb & PawnAttacksTable[~color][enemy] & LanceDropableMaskTable[color];
     if (dest.test())
     {
       sq = (color == kBlack) ? Square(enemy + 9) : Square(enemy - 9);
-      if
-      (
-        (
-          (color == kBlack && sq > k1A)
-          ||
-          (color == kWhite && sq < k9I)
-        )
-        &&
-        pos.is_attacked(sq, ~color, occupied)
-      )
+      if (pos.is_attacked(sq, ~color, occupied))
       {
         BitBoard new_occupied = occupied ^ MaskTable[sq];
         result =
@@ -1734,23 +1798,15 @@ search_drop_mate(Position &pos, const BitBoard &bb)
 silver_end:
   if (has_hand(hand, kKnight))
   {
-    dest = bb & KnightAttacksTable[~color][enemy];
+    dest = bb & KnightAttacksTable[~color][enemy] & KnightDropableMaskTable[color];
     while (dest.test())
     {
       sq = dest.pop_bit();
       // 桂馬はsqの場所に利きがなくても王が取れない
-      if
-      (
-        (color == kBlack && sq > k1B)
-        ||
-        (color == kWhite && sq < k9H)
-      )
-      {
-        BitBoard new_occupied = occupied ^ MaskTable[sq];
-        result = (can_king_escape(pos, ~color, new_occupied) || can_piece_capture(pos, sq, pinned, ~color, new_occupied));
-        if (!result)
-          return move_init(sq, kKnight);
-      }
+      BitBoard new_occupied = occupied ^ MaskTable[sq];
+      result = (can_king_escape(pos, ~color, new_occupied) || can_piece_capture(pos, sq, pinned, ~color, new_occupied));
+      if (!result)
+        return move_init(sq, kKnight);
     }
   }
   // 打ち歩詰めになるので歩は調べなくてもよい

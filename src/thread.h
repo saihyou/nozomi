@@ -34,6 +34,7 @@
 #include "move_picker.h"
 #include "position.h"
 #include "search.h"
+#include "evaluate.h"
 
 class Thread
 {
@@ -69,6 +70,7 @@ public:
   int    max_ply_;
   int    calls_count_;
 
+  Eval::HashTable         eval_hash_;
   Position                root_pos_;
   Search::RootMoveVector  root_moves_;
   Depth                   root_depth_;

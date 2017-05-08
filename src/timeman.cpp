@@ -27,7 +27,7 @@
 TimeManagement Time;
 
 void 
-TimeManagement::init(const Search::LimitsType &limits, Color us)
+TimeManagement::init(const Search::LimitsType &limits, Color us, int ply)
 {
   start_time_          = limits.start_time;
   optimum_search_time_ = limits.time[us];
