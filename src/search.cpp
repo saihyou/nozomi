@@ -44,7 +44,11 @@ namespace Search
 SignalsType   Signals;
 LimitsType    Limits;
 StateStackPtr SetupStates;
+#ifdef APERY_BOOK
+AperyBook     BookManager;
+#else
 Book          BookManager;
+#endif
 } // namespace Search
 
 using std::string;
@@ -276,7 +280,12 @@ MainThread::search()
 
   if (Options["OwnBook"] && !Limits.infinite && !Limits.mate)
   {
+#ifdef APERY_BOOK
+    std::tuple<Move, Value> book_move_score = BookManager.probe(root_pos_, Options["BookFile"], Options["Best_Book_Move"]);
+    Move book_move = std::get<0>(book_move_score);
+#else
     Move book_move = BookManager.get_move(root_pos_);
+#endif
     if (book_move != kMoveNone && std::count(root_moves_.begin(), root_moves_.end(), book_move))
     {
       std::swap(root_moves_[0], *std::find(root_moves_.begin(), root_moves_.end(), book_move));

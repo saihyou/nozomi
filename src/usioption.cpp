@@ -86,6 +86,10 @@ init(OptionsMap& o)
   o["OwnBook"]                     = Option(true);
   o["MultiPV"]                     = Option(1, 1, 500);
   o["ByoyomiMargin"]               = Option(0, 0, 5000);
+#ifdef APERY_BOOK
+  o["Best_Book_Move"] = Option(false);
+  o["Min_Book_Score"] = Option(-180, -kValueInfinite, kValueInfinite);
+#endif
 }
 
 std::ostream& 

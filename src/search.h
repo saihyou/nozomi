@@ -32,7 +32,11 @@
 #include "misc.h"
 #include "position.h"
 #include "types.h"
+#ifdef APERY_BOOK
+#include "apery_book.h"
+#else
 #include "book.h"
+#endif
 #include "stats.h"
 
 struct SearchStack
@@ -127,7 +131,11 @@ typedef std::unique_ptr<std::stack<StateInfo>> StateStackPtr;
 extern SignalsType   Signals;
 extern LimitsType    Limits;
 extern StateStackPtr SetupStates;
+#ifdef APERY_BOOK
+extern AperyBook     BookManager;
+#else
 extern Book          BookManager;
+#endif
 
 void
 init();

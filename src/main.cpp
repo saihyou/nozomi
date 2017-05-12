@@ -29,6 +29,9 @@
 #include "learn.h"
 #include "reinforcer.h"
 #include "kifu_maker.h"
+#ifdef APERY_BOOK
+#include "apery_book.h"
+#endif
 
 int
 main(int argc, char* argv[]) 
@@ -45,8 +48,13 @@ main(int argc, char* argv[])
 
   TT.resize(Options["USI_Hash"]);
 
+#ifdef APERY_BOOK
+  AperyBook::init();
+#else
   if (Options["OwnBook"])
     Search::BookManager.open(Options["BookFile"]);
+#endif
+
 #ifndef LEARN
   USI::loop(argc, argv);
 #else
