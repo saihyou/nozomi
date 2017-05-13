@@ -59,7 +59,7 @@ static const char* Defaults[] =
 };
 
 void
-benchmark(const Position& current, istream& is) 
+benchmark(const Position &current, istream &is) 
 {
   string token;
   Search::LimitsType limits;
@@ -71,7 +71,7 @@ benchmark(const Position& current, istream& is)
   string sfen_file  = (is >> token) ? token : "default";
   string limitType  = (is >> token) ? token : "depth";
 
-  Options["Hash"]    = tt_size;
+  Options["USI_Hash"]    = tt_size;
   Options["Threads"] = threads;
   Search::clear();
 
