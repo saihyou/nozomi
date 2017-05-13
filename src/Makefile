@@ -21,6 +21,11 @@ OBJS += learn.o reinforcer.o kifu_maker.o
 LDFLAGS += -fopenmp
 endif
 
+ifdef APERY_BOOK
+OBJS += apery_book.o
+CPPFLAGS += -DAPERY_BOOK
+endif
+
 nozomi: $(OBJS)
 	$(CXX) $^ $(LDFLAGS) -o $@
 
