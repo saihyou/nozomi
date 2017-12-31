@@ -78,7 +78,7 @@ void
 init(OptionsMap& o) 
 {
   o["BookFile"]                    = Option("book.bin");
-  o["Contempt"]                    = Option(0, -50,  50);
+  o["Contempt"]                    = Option(0, -kValueMate, kValueMate);
   o["Threads"]                     = Option(1, 1, 128, on_threads);
   o["USI_Hash"]                    = Option(32, 1, 16384, on_hash_size);
   o["Clear_Hash"]                  = Option(on_clear_hash);

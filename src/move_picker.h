@@ -40,9 +40,9 @@ public:
   MovePicker(const MovePicker &) = delete;
   MovePicker &operator=(const MovePicker &) = delete;
 
-  MovePicker(const Position &, Move, Value);
-  MovePicker(const Position &, Move, Depth, Square);
-  MovePicker(const Position &, Move, Depth, SearchStack *);
+  MovePicker(const Position &, Move, Value, const CapturePieceToHistory *);
+  MovePicker(const Position &, Move, Depth, Square, const CapturePieceToHistory *);
+  MovePicker(const Position &, Move, Depth, SearchStack *, const CapturePieceToHistory *);
 
   Move next_move();
 
@@ -63,6 +63,7 @@ private:
 
   const Position         &pos_;
   const SearchStack      *ss_;
+  const CapturePieceToHistory *capture_history_;
   Move                    killers_[2];
   Move                    countermove_;
   Depth                   depth_;

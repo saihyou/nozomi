@@ -24,6 +24,8 @@
 #ifndef _STATS_H_
 #define _STATS_H_
 
+#include <array>
+#include <limits>
 #include <cstring>
 #include "types.h"
 #include "move.h"
@@ -115,6 +117,40 @@ struct FromToStats
 
 private:
   int table[kNumberOfColor][kNumberOfBoardHand][kBoardSquare];
+};
+
+template<int kSize1, int kSize2, int kSize3, typename T = int16_t>
+struct StatCubes : public std::array<std::array<std::array<T, kSize3>, kSize2>, kSize1>
+{
+  void
+  fill(const T &v)
+  {
+    T *p = &(*this)[0][0][0];
+    std::fill(p, p + sizeof(*this) / sizeof(*p), v);
+  }
+
+  void
+  update(T &entry, int bonus, const int d, const int w)
+  {
+    assert(abs(bonus) <= d);
+    assert(abs(w * d) < std::numeric_limits<T>().max());
+
+    entry += bonus * w - entry * abs(bonus) / d;
+
+    assert(abs(entry) <= w * d);
+  }
+};
+
+typedef StatCubes<kPieceMax, kBoardSquare, kPieceTypeMax> CapturePieceToBoards;
+
+struct CapturePieceToHistory : public CapturePieceToBoards
+{
+  void
+  update(Piece pc, Square to, PieceType captured, int bonus)
+  {
+    StatCubes::update((*this)[pc][to][captured], bonus, 324, 2);
+  }
+
 };
 
 #endif

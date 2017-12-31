@@ -24,17 +24,11 @@
 #include "thread.h"
 #include "usi.h"
 
-// ミニバッチのサイズ
-// この数の局面ごとにパラメーターを更新する
-constexpr int
-kBatchSize   = 1000000;
-
 // 評価値から勝率に変換する
-// 実測値では1 / (1 + exp(-v/558))が当てはまりがよいが、Ponanza方式に合わせる
 double
 win_rate(Value value)
 {
-  return 1.0 / (1.0 + std::exp(-static_cast<double>(value) / 600.0));
+  return 1.0 / (1.0 + std::exp(-static_cast<double>(value) / 575.0));
 }
 
 void
@@ -76,7 +70,6 @@ Gradient::increment(const Position & pos, double delta)
       pi = lower_file_kpp_index(pi);
     }
     kkpt[bksq.square()][wksq.square()][pi][pos.side_to_move()] += delta;
-    kkp[bksq.square()][wksq.square()][pi] += delta;
 
     Square inv_bk = Eval::inverse(wk);
     Square inv_wk = Eval::inverse(bk);
@@ -100,7 +93,6 @@ Gradient::increment(const Position & pos, double delta)
     }
 
     kkpt[inv_bksq.square()][inv_wksq.square()][inv_pi][~pos.side_to_move()] -= delta;
-    kkp[inv_bksq.square()][inv_wksq.square()][inv_pi] -= delta;
   }
 }
 
@@ -117,14 +109,6 @@ operator+=(Gradient &lhs, Gradient &rhs)
   (
     auto lit = &(***std::begin(lhs.kpp)), rit = &(***std::begin(rhs.kpp));
     lit != &(***std::end(lhs.kpp));
-    ++lit, ++rit
-  )
-    *lit += *rit;
-
-  for
-  (
-    auto lit = &(***std::begin(lhs.kkp)), rit = &(***std::begin(rhs.kkp));
-    lit != &(***std::end(lhs.kkp));
     ++lit, ++rit
   )
     *lit += *rit;
@@ -150,6 +134,9 @@ Reinforcer::reinforce(std::istringstream &is)
   is >> type;
   is >> record_file_name;
   is >> num_threads;
+  is >> batch_size_;
+  if (batch_size_ == 0)
+    batch_size_ = 1000000;
 
   TT.clear();
   Search::Limits.infinite            = 1;
@@ -178,13 +165,26 @@ void
 Reinforcer::update_param(const std::string &record_file_name, int num_threads)
 {
   load_param();
+#ifdef DOUBLE_COST
+  win_diff_ = 0;
+  value_diff_ = 0;
+  for (int i = 0; i < num_threads; ++i)
+  {
+    win_gradients_.push_back(std::unique_ptr<Gradient>(new Gradient));
+    value_gradients_.push_back(std::unique_ptr<Gradient>(new Gradient));
+  }
 
+  for (auto &g : win_gradients_)
+    g->clear();
+  for (auto &g : value_gradients_)
+    g->clear();
+#else
   all_diff_ = 0;
   for (int i = 0; i < num_threads; ++i)
     gradients_.push_back(std::unique_ptr<Gradient>(new Gradient));
-
   for (auto &g : gradients_)
     g->clear();
+#endif
 
   std::vector<PositionData> position_list;
   std::ifstream ifs(record_file_name.c_str());
@@ -193,12 +193,30 @@ Reinforcer::update_param(const std::string &record_file_name, int num_threads)
 
   while (!eof)
   {
-    read_file(ifs, position_list, kBatchSize, eof);
+    read_file(ifs, position_list, batch_size_, eof);
     if (position_list.empty())
       break;
 
     TT.clear();
     compute_gradient(position_list);
+#ifdef DOUBLE_COST
+    for (int i = 1; i < num_threads; ++i)
+    {
+      *win_gradients_[0] += *win_gradients_[i];
+      *value_gradients_[0] += *value_gradients_[i];
+    }
+    position_list.clear();
+    add_param(*win_gradients_[0], *value_gradients_[0]);
+    std::cout << "count : " << ++count << std::endl;
+    std::cout << std::sqrt(static_cast<double>(win_diff_) / batch_size_) << std::endl;
+    std::cout << std::sqrt(static_cast<double>(value_diff_) / batch_size_) << std::endl;
+    win_diff_ = 0;
+    value_diff_ = 0;
+    for (auto &g : win_gradients_)
+      g->clear();
+    for (auto &g : value_gradients_)
+      g->clear();
+#else
     for (int i = 1; i < num_threads; ++i)
       *gradients_[0] += *gradients_[i];
     position_list.clear();
@@ -208,10 +226,10 @@ Reinforcer::update_param(const std::string &record_file_name, int num_threads)
     all_diff_ = 0;
     for (auto &g : gradients_)
       g->clear();
+#endif
     if (count % 100 == 0)
       save_param();
   }
-
   save_param();
 }
 
@@ -230,7 +248,7 @@ Reinforcer::compute_gradient(std::vector<PositionData> &position_list)
     thread_id = omp_get_thread_num();
 #endif
 
-    if (data.value < -2000 || data.value > 2000 || data.value == kValueZero)
+    if (data.win == kNoColor)
       continue;
 
     positions_[thread_id].set(data.sfen, Threads[thread_id + 1]);
@@ -247,8 +265,8 @@ Reinforcer::compute_gradient(std::vector<PositionData> &position_list)
     double delta_value = win_rate(data.value) - win_rate(quiet_value);
 
     // 最終的な勝敗と局面の静止探索の評価値から換算した勝率の差をとる
-    // 1.0ではなく2000点での勝率を使うとか、現在価値で割り引くとかやったほうがいいかもしれない
     Color root_color = positions_[thread_id].side_to_move();
+#ifdef DOUBLE_COST
     double delta_win = 0;
     if (root_color == kBlack)
     {
@@ -273,7 +291,46 @@ Reinforcer::compute_gradient(std::vector<PositionData> &position_list)
       }
     }
 
-    double delta = delta_win + delta_value;
+    if (root_color == kWhite)
+    {
+      delta_win = -delta_win;
+      delta_value = -delta_value;
+    }
+
+    int j = 0;
+    while (pv[j] != kMoveNone)
+    {
+      positions_[thread_id].do_move(pv[j], state[j]);
+      ++j;
+    }
+    win_gradients_[thread_id]->increment(positions_[thread_id], delta_win);
+    value_gradients_[thread_id]->increment(positions_[thread_id], delta_value);
+#else
+    const double alpha = 0.7;
+    double delta_win = 0;
+    if (root_color == kBlack)
+    {
+      if (data.win == kBlack)
+      {
+        delta_win = 1.0 - win_rate(quiet_value);
+      }
+      else if (data.win == kWhite)
+      {
+        delta_win = 0.0 - win_rate(quiet_value);
+      }
+  }
+    else
+    {
+      if (data.win == kWhite)
+      {
+        delta_win = 1.0 - win_rate(quiet_value);
+      }
+      else if (data.win == kBlack)
+      {
+        delta_win = 0.0 - win_rate(quiet_value);
+      }
+    }
+    double delta = alpha * delta_win + (1 - alpha) * delta_value;
     if (root_color == kWhite)
       delta = -delta;
 
@@ -284,12 +341,18 @@ Reinforcer::compute_gradient(std::vector<PositionData> &position_list)
       ++j;
     }
     gradients_[thread_id]->increment(positions_[thread_id], delta);
+#endif
 
 #ifdef _OPENMP
 #pragma omp critical
 #endif
     {
+#ifdef DOUBLE_COST
+      win_diff_ += delta_win * delta_win;
+      value_diff_ += delta_value * delta_value;
+#else
       all_diff_ += delta * delta;
+#endif
     }
   }
 }
@@ -341,7 +404,11 @@ Reinforcer::read_file(std::ifstream &ifs, std::vector<PositionData> &position_li
 
 // 勾配からパラメーターを更新する
 void
+#ifdef DOUBLE_COST
+Reinforcer::add_param(const Gradient &param1, const Gradient &param2)
+#else
 Reinforcer::add_param(const Gradient &param)
+#endif
 {
 #ifdef _OPENMP
 #pragma omp parallel
@@ -361,6 +428,18 @@ Reinforcer::add_param(const Gradient &param)
             continue;
 
           KppIndex kpp_index(king, i, j);
+#ifdef DOUBLE_COST
+          if (param1.kpp[kpp_index.king][kpp_index.i][kpp_index.j] > 0 && param2.kpp[kpp_index.king][kpp_index.i][kpp_index.j] > 0)
+          {
+            if (Eval::KPP[king][i][j] < INT16_MAX)
+              Eval::KPP[king][i][j] += 1;
+          }
+          else if (param1.kpp[kpp_index.king][kpp_index.i][kpp_index.j] < 0 && param2.kpp[kpp_index.king][kpp_index.i][kpp_index.j] < 0)
+          {
+            if (Eval::KPP[king][i][j] > INT16_MIN)
+              Eval::KPP[king][i][j] -= 1;
+          }
+#else
           if (param.kpp[kpp_index.king][kpp_index.i][kpp_index.j] > 0)
           {
             if (Eval::KPP[king][i][j] < INT16_MAX)
@@ -371,6 +450,7 @@ Reinforcer::add_param(const Gradient &param)
             if (Eval::KPP[king][i][j] > INT16_MIN)
               Eval::KPP[king][i][j] -= 1;
           }
+#endif
         }
       }
     }
@@ -404,22 +484,29 @@ Reinforcer::add_param(const Gradient &param)
           {
             pi = lower_file_kpp_index(pi);
           }
-
-          if (param.kkp[ksq0.square()][ksq1.square()][pi] > 0)
+#ifdef DOUBLE_COST
+          if (param1.kkpt[ksq0.square()][ksq1.square()][pi][0] > 0 && param2.kkpt[ksq0.square()][ksq1.square()][pi][0] > 0)
           {
             if (Eval::KKPT[k0][k1][i][0] < INT16_MAX)
               Eval::KKPT[k0][k1][i][0] += 1;
-            if (Eval::KKPT[k0][k1][i][1] < INT16_MAX)
-              Eval::KKPT[k0][k1][i][1] += 1;
           }
-          else if (param.kkp[ksq0.square()][ksq1.square()][pi] < 0)
+          else if (param1.kkpt[ksq0.square()][ksq1.square()][pi][0] < 0 && param2.kkpt[ksq0.square()][ksq1.square()][pi][0] < 0)
           {
             if (Eval::KKPT[k0][k1][i][0] > INT16_MIN)
               Eval::KKPT[k0][k1][i][0] -= 1;
+          }
+
+          if (param1.kkpt[ksq0.square()][ksq1.square()][pi][1] > 0 && param2.kkpt[ksq0.square()][ksq1.square()][pi][1] > 0)
+          {
+            if (Eval::KKPT[k0][k1][i][1] < INT16_MAX)
+              Eval::KKPT[k0][k1][i][1] += 1;
+          }
+          else if (param1.kkpt[ksq0.square()][ksq1.square()][pi][1] < 0 && param2.kkpt[ksq0.square()][ksq1.square()][pi][1] < 0)
+          {
             if (Eval::KKPT[k0][k1][i][1] > INT16_MIN)
               Eval::KKPT[k0][k1][i][1] -= 1;
           }
-
+#else
           if (param.kkpt[ksq0.square()][ksq1.square()][pi][0] > 0)
           {
             if (Eval::KKPT[k0][k1][i][0] < INT16_MAX)
@@ -430,7 +517,6 @@ Reinforcer::add_param(const Gradient &param)
             if (Eval::KKPT[k0][k1][i][0] > INT16_MIN)
               Eval::KKPT[k0][k1][i][0] -= 1;
           }
-
           if (param.kkpt[ksq0.square()][ksq1.square()][pi][1] > 0)
           {
             if (Eval::KKPT[k0][k1][i][1] < INT16_MAX)
@@ -441,6 +527,7 @@ Reinforcer::add_param(const Gradient &param)
             if (Eval::KKPT[k0][k1][i][1] > INT16_MIN)
               Eval::KKPT[k0][k1][i][1] -= 1;
           }
+#endif
         }
       }
     }

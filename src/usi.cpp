@@ -289,9 +289,7 @@ USI::format_value(Value v, Value alpha, Value beta)
 {
   stringstream ss;
 
-  if (abs(v) < kValueMateInMaxPly)
-    ss << "cp " << v * 100 / Eval::kPawnValue;
-  else if (v == kValueSamePosition || v == -kValueSamePosition)
+  if (abs(v) < kValueSamePosition)
     ss << "cp " << v;
   else
     ss << "mate " << (v > 0 ? kValueMate - v : -kValueMate - v);

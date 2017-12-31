@@ -231,6 +231,7 @@ private:
   see_ge(Move m, Value v, Color c) const;
  
   BitBoard   piece_board_[kNumberOfColor][kPieceTypeMax];
+  BitBoard   occupied_;
   Hand       hand_[kNumberOfColor];
   Piece      squares_[kBoardSquare];
   Square     square_king_[kNumberOfColor];
@@ -323,7 +324,7 @@ Position::square(Square sq) const
 inline BitBoard
 Position::occupied() const
 {
-  return piece_board_[kBlack][kOccupied] | piece_board_[kWhite][kOccupied];
+  return occupied_;
 }
 
 inline BitBoard
@@ -510,6 +511,7 @@ Position::move_temporary(Square from, Square to, PieceType type, PieceType captu
     piece_board_[enemy][capture].xor_bit(to);
     piece_board_[enemy][kOccupied].xor_bit(to);
   }
+  occupied_ = piece_board_[kBlack][kOccupied] | piece_board_[kWhite][kOccupied];
 }
 
 inline void
@@ -525,6 +527,7 @@ Position::move_with_promotion_temporary(Square from, Square to, PieceType type, 
     piece_board_[enemy][capture].xor_bit(to);
     piece_board_[enemy][kOccupied].xor_bit(to);
   }
+  occupied_ = piece_board_[kBlack][kOccupied] | piece_board_[kWhite][kOccupied];
 }
 
 #endif

@@ -136,6 +136,7 @@ extern AperyBook     BookManager;
 #else
 extern Book          BookManager;
 #endif
+extern Value         DrawValue[kNumberOfColor];
 
 void
 init();

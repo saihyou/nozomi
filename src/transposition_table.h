@@ -141,6 +141,9 @@ public:
   void 
   clear();
 
+  int
+  hashfull() const;
+
   uint8_t
   generation() const
   {

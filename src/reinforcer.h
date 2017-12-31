@@ -25,6 +25,8 @@
 #include "stats.h"
 #include "learn.h"
 
+#define DOUBLE_COST
+
 struct PositionData
 {
   std::string sfen;
@@ -35,7 +37,6 @@ struct PositionData
 struct Gradient
 {
   double kpp[kBoardSquare][Eval::kFEEnd][Eval::kFEEnd];
-  double kkp[kBoardSquare][kBoardSquare][Eval::kFEEnd];
   double kkpt[kBoardSquare][kBoardSquare][Eval::kFEEnd][kNumberOfColor];
 
   void increment(const Position &pos, double delta);
@@ -54,14 +55,25 @@ private:
   void   update_param(const std::string &record_file_name, int num_threads);
   void   compute_gradient(std::vector<PositionData> &position_list);
   size_t read_file(std::ifstream &ifs, std::vector<PositionData> &position_list, size_t num_positions, bool &eof);
-  void   add_param(const Gradient &param);
+#ifdef DOUBLE_COST
+  void   add_param(const Gradient &param1, const Gradient &param2);
+#else
+  void   add_param(const Gradient &param1);
+#endif
   void   load_param();
   void   save_param();
-
+  int                                    batch_size_;
   std::vector<std::string>               game_list_;
   std::vector<Position>                  positions_;
+#ifdef DOUBLE_COST
+  std::vector<std::unique_ptr<Gradient>> win_gradients_;
+  std::vector<std::unique_ptr<Gradient>> value_gradients_;
+  double                                 win_diff_;
+  double                                 value_diff_;
+#else
   std::vector<std::unique_ptr<Gradient>> gradients_;
   double                                 all_diff_;
+#endif
 };
 
 #endif

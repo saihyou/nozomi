@@ -538,6 +538,7 @@ Position::do_move(Move m, StateInfo &new_state, bool gives_check)
     }
   }
 
+  occupied_ = piece_board_[kBlack][kOccupied] | piece_board_[kWhite][kOccupied];
   state_->board_key = board_key;
   state_->hand_key = hand_key;
   state_->hand_black = hand_[kBlack];
@@ -625,6 +626,7 @@ Position::undo_move(Move move)
       squares_[to] = kEmpty;
     }
   }
+  occupied_ = piece_board_[kBlack][kOccupied] | piece_board_[kWhite][kOccupied];
   state_ = state_->previous;
 }
 
@@ -699,12 +701,11 @@ Position::gives_mate_by_drop_pawn(Square sq) const
 
   // 玉以外の駒が歩をとることができるか
   // 香車は前にしか行けないため、王と歩の間にいない限り取ることができないので調べない
-  occupy = occupied();
   BitBoard sum = piece_board_[enemy][kKnight] & KnightAttacksTable[color][sq];
   sum.and_or(piece_board_[enemy][kSilver], SilverAttacksTable[color][sq]);
   sum.and_or(total_gold(enemy), GoldAttacksTable[color][sq]);
-  sum.and_or(bishop_horse(enemy), bishop_attack(occupy, sq));
-  sum.and_or(rook_dragon(enemy), rook_attack(occupy, sq));
+  sum.and_or(bishop_horse(enemy), bishop_attack(occupied_, sq));
+  sum.and_or(rook_dragon(enemy), rook_attack(occupied_, sq));
   sum.and_or((piece_board_[enemy][kHorse] | piece_board_[enemy][kDragon]), KingAttacksTable[sq]);
   BitBoard pinned = pinned_pieces(enemy);
   while (sum.test())
@@ -891,7 +892,7 @@ Position::pseudo_legal(Move m) const
     {
       if (type == kKing)
       {
-        BitBoard oc = occupied();
+        BitBoard oc = occupied_;
         oc.xor_bit(from);
         if (is_attacked(to, side_to_move_, oc))
           return false;
@@ -981,6 +982,7 @@ Position::put_piece(Piece piece, Square sq)
   Color color = (piece < kFlagWhite) ? kBlack : kWhite;
   squares_[sq] = piece;
   piece_board_[color][kOccupied].xor_bit(sq);
+  occupied_.xor_bit(sq);
   piece_board_[color][piece & 0xF].xor_bit(sq);
   state_->board_key += Zobrist::tables[color][piece & 0xf][sq];
   if (piece == kBlackKing)
@@ -1125,7 +1127,7 @@ Position::see_ge(Move m, Value v, Color c) const
   Square    from = move_from(m);
   PieceType next_victim;
   Color     side_to_move = ~c;
-  BitBoard  occupied = this->occupied();
+  BitBoard  occupied = occupied_;
   Value     balance;
   BitBoard  side_to_move_attackers;
   BitBoard  attackers;
@@ -1258,7 +1260,12 @@ Repetition
 Position::in_repetition() const
 {
   StateInfo *state = state_;
+#ifdef REPETITION_CHECK_FULL
   for (int i = 2; i <= state_->pilies_from_null; i += 2)
+#else
+  int m = std::min(state_->pilies_from_null, 16);
+  for (int i = 2; i <= m; i += 2)
+#endif
   {
     state = state->previous->previous;
     if (state->board_key == state_->board_key)

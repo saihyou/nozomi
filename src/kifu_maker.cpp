@@ -1,4 +1,4 @@
-/*
+﻿/*
   nozomi, a USI shogi playing engine
   Copyright (C) 2017 Yuhei Ohmori
 
@@ -28,34 +28,47 @@ namespace KifuMaker
 {
 // 探索深さ
 constexpr Depth
-kSearchDepth = Depth(6);
+kSearchDepth = Depth(8);
 
 // 探索打ち切りの点数
 constexpr Value
-kWinValue = Value(2000);
+kWinValue = Value(5000);
 
 // book局面からkMinRandamMove以上kMaxRandamMove以下の数、ランダムムーブで動かし
 // 探索の初期局面を生成する
 constexpr int
-kMinRandamMove = 0;
+kMinRandamMove = 1;
 
 constexpr int
-kMaxRandamMove = 25;
+kMaxRandamMove = 3;
 
 // kMinBookMove以上kMaxBookMove以下のbookの手を使いbook局面を生成する
 constexpr int
-kMinBookMove = 5;
+kMinBookMove = 1;
 
 constexpr int
-kMaxBookMove = 30;
+kMaxBookMove = 160;
+
+constexpr size_t
+kMultiPv20 = 10;
+
+constexpr size_t
+kMultiPvOver = 5;
+
+constexpr int
+kMultiPvDepthMin = 2;
+
+constexpr int
+kMultiPvDepthMax = 3;
+
 
 // 局面数がこの数を超えたら、局面をシャッフルしファイルに書き出す
 constexpr int
-kKifuStoreNum = 100000;
+kKifuStoreNum = 10000;
 
 // ファイルに書き出した回数がこの数になったら終了
 constexpr int
-kEndCount = 50;
+kEndCount = 1;
 
 // 合法手の中からランダムで手を返す
 Move
@@ -66,6 +79,12 @@ pick_randam_move(Position &pos, std::mt19937 &mt)
     return kMoveNone;
   std::uniform_int_distribution<> r(0, static_cast<int>(ml.size()) - 1);
   return ml[r(mt)];
+}
+
+double
+win_rate(Value value)
+{
+  return 1.0 / (1.0 + std::exp(-static_cast<double>(value) / 557.0));
 }
 
 // bookfileを読み込む
@@ -91,6 +110,71 @@ load_book(const std::string &file_name, std::vector<std::vector<std::string>> &b
       moves.push_back(token);
     book.push_back(moves);
   }
+  std::cout << "load book " << book.size() << std::endl;
+}
+
+bool
+search(Position &pos, size_t multi_pv, Depth search_depth)
+{
+  Thread *thread = pos.this_thread();
+  SearchStack stack[kMaxPly + 7];
+  SearchStack *ss = stack + 4;
+  std::memset(ss - 4, 0, 8 * sizeof(SearchStack));
+  for (int i = 4; i > 0; --i)
+    (ss - i)->counter_moves = &thread->counter_move_history_[kEmpty][0];
+
+  thread->root_moves_.clear();
+  for (auto &m : MoveList<kLegalForSearch>(pos))
+    thread->root_moves_.push_back(Search::RootMove(m.move));
+  if (thread->root_moves_.empty())
+    return false;
+
+  Search::DrawValue[pos.side_to_move()] = -kValueSamePosition;
+  Search::DrawValue[~pos.side_to_move()] = kValueSamePosition;
+  Value v;
+  for (Depth d = kDepthZero + 1; d <= search_depth; ++d)
+  {
+    Value alpha = -kValueInfinite;
+    Value beta = kValueInfinite;
+    Value delta = -kValueInfinite;
+    for (Search::RootMove &rm : thread->root_moves_)
+      rm.previous_score = rm.score;
+
+    for (thread->pv_index_ = 0; thread->pv_index_ < multi_pv && thread->pv_index_ < thread->root_moves_.size(); ++thread->pv_index_)
+    {
+      if (thread->root_depth_ >= 5 * kOnePly)
+      {
+        delta = Value(64);
+        alpha = std::max(thread->root_moves_[0].previous_score - delta, -kValueInfinite);
+        beta = std::min(thread->root_moves_[0].previous_score + delta, kValueInfinite);
+      }
+
+      while (true)
+      {
+        v = Search::search(pos, ss, -kValueInfinite, kValueInfinite, d);
+        std::stable_sort(thread->root_moves_.begin(), thread->root_moves_.end());
+
+        if (v <= alpha)
+        {
+          beta = (alpha + beta) / 2;
+          alpha = std::max(v - delta, -kValueInfinite);
+        }
+        else if (v >= beta)
+        {
+          alpha = (alpha + beta) / 2;
+          beta = std::min(v + delta, kValueInfinite);
+        }
+        else
+        {
+          break;
+        }
+        
+        delta += delta / 4 + 5;
+      }
+      std::stable_sort(thread->root_moves_.begin(), thread->root_moves_.begin() + thread->pv_index_ + 1);
+    }
+  }
+  return true;
 }
 
 // 自己対局を行い局面を生成する
@@ -105,17 +189,64 @@ play_game(std::vector<PositionData> &position_list, std::vector<std::vector<std:
   pos.set("lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1", Threads[0]);
   Thread *thread = pos.this_thread();
 
-  if (!book.empty())
+  if (book.empty())
   {
-    std::uniform_int_distribution<> book_index(0, book.size());
+    std::uniform_real_distribution<> select_prob(0.0, 1.0);
+    std::uniform_int_distribution<> move_prob(kMinBookMove, kMaxBookMove);
+    std::uniform_int_distribution<> search_prob(kMultiPvDepthMin, kMultiPvDepthMax);
+    int book_end = move_prob(mt);
+    for (int k = 0; k < book_end; ++k)
+    {
+      size_t multipv_max = (pos.game_ply() <= 20) ? kMultiPv20 : kMultiPvOver;
+
+      if (!search(pos, multipv_max, static_cast<Depth>(search_prob(mt))))
+        return;
+      double prob[kMultiPv20] = {0.0};
+      double total = 0.0;
+      int pv_end = static_cast<int>(std::min(multipv_max, thread->root_moves_.size()));
+      for (int i = 0; i < pv_end; ++i)
+      {
+        prob[i] = win_rate(thread->root_moves_[i].score);
+        total += prob[i];
+      }
+      for (int i = 0; i < pv_end; ++i)
+        prob[i] = prob[i] / total;
+      double t = select_prob(mt);
+      int index;
+      total = 0.0;
+      for (index = 0; index < pv_end - 1; ++index)
+      {
+        total += prob[index];
+        if (total > t)
+          break;
+      }
+      state->push(StateInfo());
+      pos.do_move(thread->root_moves_[index].pv[0], state->top());
+    }
+  }
+  else
+  {
+    std::uniform_int_distribution<> book_index(0, static_cast<int>(book.size() - 1));
     std::vector<std::string> &moves = book[book_index(mt)];
-    std::uniform_int_distribution<> move_index(kMinBookMove, kMaxBookMove);
-    int book_end = std::min(move_index(mt), static_cast<int>(moves.size()));
+    std::uniform_int_distribution<> move_index(kMinBookMove, static_cast<int>(moves.size()));
+    int book_end = move_index(mt);
     for (int i = 0; i < book_end; ++i)
     {
       Move m = USI::to_move(pos, moves[i]);
       if (m == kMoveNone)
         return;
+      state->push(StateInfo());
+      pos.do_move(m, state->top());
+    }
+
+    std::uniform_int_distribution<> g(kMinRandamMove, kMaxRandamMove);
+    int randam_end = g(mt);
+    for (int i = 0; i < randam_end; ++i)
+    {
+      Move m = pick_randam_move(pos, mt);
+      if (m == kMoveNone)
+        return;
+
       state->push(StateInfo());
       pos.do_move(m, state->top());
     }
@@ -131,36 +262,26 @@ play_game(std::vector<PositionData> &position_list, std::vector<std::vector<std:
   thread->calls_count_ = 0;
   thread->max_ply_ = 0;
   thread->root_depth_ = kDepthZero;
-  std::uniform_int_distribution<> g(kMinRandamMove, kMaxRandamMove);
-  int randam_end = g(mt);
-  for (int i = 0; i < randam_end; ++i)
-  {
-    Move m = pick_randam_move(pos, mt);
-    if (m == kMoveNone)
-      return;
 
-    state->push(StateInfo());
-    pos.do_move(m, state->top());
-  }
+  std::vector<PositionData> game;
+  if (!search(pos, 1, kSearchDepth))
+    return;
+  Value initial_value = thread->root_moves_[0].score;
+  if (initial_value < -kWinValue || initial_value > kWinValue)
+    return;
+  PositionData d;
+  d.sfen = USI::to_sfen(pos);
+  d.value = initial_value;
+  game.push_back(d);
+  state->push(StateInfo());
+  pos.do_move(thread->root_moves_[0].pv[0], state->top());
 
   Color win;
-  std::vector<PositionData> game;
   while (true)
   {
-    SearchStack stack[kMaxPly + 7];
-    SearchStack *ss = stack + 4;
-    std::memset(ss - 4, 0, 8 * sizeof(SearchStack));
-    for (int i = 4; i > 0; --i)
-      (ss - i)->counter_moves = &thread->counter_move_history_[kEmpty][0];
-
-    thread->root_moves_.clear();
-    for (auto &m : MoveList<kLegalForSearch>(pos))
-      thread->root_moves_.push_back(Search::RootMove(m.move));
-    if (thread->root_moves_.empty())
-      return;
-
-    Value v = Search::search(pos, ss, -kValueInfinite, kValueInfinite, kSearchDepth);
-    if (v < -kWinValue || v > kWinValue || v == kValueDraw)
+    search(pos, 1, kSearchDepth);
+    Value v = thread->root_moves_[0].score;
+    if (v < -kWinValue || v > kWinValue)
     {
       if (v < -kWinValue)
         win = ~pos.side_to_move();
@@ -170,18 +291,33 @@ play_game(std::vector<PositionData> &position_list, std::vector<std::vector<std:
         win = kNoColor;
       break;
     }
+
+    if (pos.game_ply() > 1000)
+    {
+      if (v > 0)
+        win = pos.side_to_move();
+      else if (v < 0)
+        win = ~pos.side_to_move();
+      else
+        win = kNoColor;
+      break;
+    }
+
     PositionData data;
     data.value = v;
     data.sfen = USI::to_sfen(pos);
     game.push_back(data);
-    std::stable_sort(thread->root_moves_.begin(), thread->root_moves_.end());
     state->push(StateInfo());
     pos.do_move(thread->root_moves_[0].pv[0], state->top());
   }
-  for (auto &g : game)
+
+  if (win != kNoColor)
   {
-    g.win = win;
-    position_list.push_back(g);
+    for (auto &g : game)
+    {
+      g.win = win;
+      position_list.push_back(g);
+    }
   }
 }
 
@@ -219,11 +355,12 @@ make(std::istringstream &is)
       {
         out_file << m.sfen << "," << m.value;
         if (m.win == kBlack)
-          out_file << ",b" << std::endl;
+          out_file << ",b";
         else if (m.win == kWhite)
-          out_file << ",w" << std::endl;
+          out_file << ",w";
         else
-          out_file << ",d" << std::endl;
+          out_file << ",d";
+        out_file << std::endl;
       }
       out_file.close();
       position_list.clear();

@@ -229,21 +229,21 @@ public:
     return tmp;
   }
 
-  BitBoard
+  BitBoard &
   operator&=(const BitBoard &b)
   {
     _mm_store_si128(&this->board_, _mm_and_si128(this->board_, b.board_));
     return *this;
   }
 
-  BitBoard
+  BitBoard &
   operator|=(const BitBoard &b)
   {
     _mm_store_si128(&this->board_, _mm_or_si128(board_, b.board()));
     return *this;
   }
 
-  BitBoard
+  BitBoard &
   operator^=(const BitBoard &b)
   {
     _mm_store_si128(&this->board_, _mm_xor_si128(this->board_, b.board_));

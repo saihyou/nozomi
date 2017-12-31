@@ -80,6 +80,7 @@ public:
   HistoryStats            history_;
   MovesStats              counter_moves_;
   CounterMoveHistoryStats counter_move_history_;
+  CapturePieceToHistory   capture_history_;
 };
 
 struct MainThread : public Thread
@@ -87,9 +88,9 @@ struct MainThread : public Thread
   virtual void
   search();
 
-  bool   easy_move_played;
   bool   failed_low;
   double best_move_changes;
+  double previous_time_reduction;
   Value  previous_score;
 };
 

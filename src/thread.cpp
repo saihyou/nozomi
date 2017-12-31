@@ -41,6 +41,7 @@ Thread::Thread()
   counter_moves_.clear();
   from_to_.clear();
   counter_move_history_.clear();
+  capture_history_.fill(0);
   index_  = Threads.size();
   std::unique_lock<std::mutex> lk(mutex_);
   searching_ = true;

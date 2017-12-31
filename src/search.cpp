@@ -49,6 +49,7 @@ AperyBook     BookManager;
 #else
 Book          BookManager;
 #endif
+Value         DrawValue[kNumberOfColor];
 } // namespace Search
 
 using std::string;
@@ -97,47 +98,6 @@ reduction(bool i, Depth d, int mn, bool gives_check)
   return Reductions[PvNode][i][std::min(int(d), 63)][std::min(mn, 63)][gives_check];
 }
 
-struct EasyMoveManager
-{
-  void
-  clear()
-  {
-    stable_count = 0;
-    expected_position_key = 0;
-    pv[0] = pv[1] = pv[2] = kMoveNone;
-  }
-
-  Move
-  get(Key key) const
-  {
-    return expected_position_key == key ? pv[2] : kMoveNone;
-  }
-
-  void
-  update(Position &pos, const std::vector<Move> &new_pv)
-  {
-    assert(new_pv.size() >= 3);
-
-    stable_count = (new_pv[2] == pv[2]) ? stable_count + 1 : 0;
-
-    if (!std::equal(new_pv.begin(), new_pv.begin() + 3, pv))
-    {
-      std::copy(new_pv.begin(), new_pv.begin() + 3, pv);
-
-      StateInfo st[2];
-      pos.do_move(new_pv[0], st[0]);
-      pos.do_move(new_pv[1], st[1]);
-      expected_position_key = pos.key();
-      pos.undo_move(new_pv[1]);
-      pos.undo_move(new_pv[0]);
-    }
-  }
-
-  int stable_count;
-  Key expected_position_key;
-  Move pv[3];
-};
-
 const int kSkipSize[] = { 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4 };
 const int kSkipPhase[] = { 0, 1, 0, 1, 2, 3, 0, 1, 2, 3, 4, 5, 0, 1, 2, 3, 4, 5, 6, 7 };
 
@@ -147,9 +107,6 @@ stat_bonus(Depth depth)
   int d = depth / kOnePly;
   return d * d + 2 * d - 2;
 }
-
-EasyMoveManager EasyMove;
-Value DrawValue[kNumberOfColor];
 
 template <NodeType NT>
 Value 
@@ -180,15 +137,13 @@ void
 update_cm_stats(SearchStack *ss, Piece pc, Square s, int bonus);
 
 void 
-update_stats
-(
-  const Position &pos,
-  SearchStack *ss,
-  Move move,
-  Move *quiets,
-  int quiets_count,
-  int bonus
-);
+update_stats(const Position &pos, SearchStack *ss, Move move, Move *quiets, int quiets_count, int bonus);
+
+void
+update_capture_stats(const Position &pos, Move move, Move *captures, int capture_count, int bonus);
+
+bool
+pv_is_draw(Position &pos);
 
 void
 check_time();
@@ -253,6 +208,7 @@ Search::clear()
   }
 
   Threads.main()->previous_score = kValueInfinite;
+  Threads.main()->previous_time_reduction = 1;
 }
 
 void
@@ -260,8 +216,10 @@ MainThread::search()
 {
   Color us = root_pos_.side_to_move();
   Time.init(Limits, us, root_pos_.game_ply());
+  TT.new_search();
   bool search_best_thread = true;
-  int contempt = Options["Contempt"] * Eval::kPawnValue / 100; // From centipawns
+
+  int contempt = Options["Contempt"];
   DrawValue[us] = kValueDraw - Value(contempt);
   DrawValue[~us] = kValueDraw + Value(contempt);
 
@@ -324,18 +282,13 @@ exit:
   }
 
   Thread *best_thread = this;
-  if (Options["MultiPV"] == 1 && search_best_thread && !this->easy_move_played)
+  if (Options["MultiPV"] == 1 && search_best_thread)
   {
     for (Thread *th : Threads)
     {
       Depth depth_diff = th->completed_depth_ - best_thread->completed_depth_;
       Value score_diff = th->root_moves_[0].score - best_thread->root_moves_[0].score;
-      if
-      (
-        (depth_diff > 0 && score_diff >= 0)
-        ||
-        (score_diff > 0 && depth_diff >= 0)
-      )
+      if (score_diff > 0 && (depth_diff >= 0 || th->root_moves_[0].score >= kValueSamePosition))
         best_thread = th;
     }
   }
@@ -348,6 +301,8 @@ exit:
 
   if (best_thread->root_moves_[0].pv[0] != kMoveNone)
   {
+    previous_score = best_thread->root_moves_[0].score;
+
     if (best_thread != this)
       sync_cout << usi_pv(best_thread->root_pos_, best_thread->completed_depth_, -kValueInfinite, kValueInfinite) << sync_endl;
 
@@ -373,8 +328,10 @@ Thread::search()
   Value alpha      = -kValueInfinite;
   Value beta       = kValueInfinite;
   Value delta      = -kValueInfinite;
-  Move easy_move   = kMoveNone;
+  Move  last_best_move = kMoveNone;
+  Depth last_best_move_depth = kDepthZero;
   MainThread *main_thread = (this == Threads.main() ? Threads.main() : nullptr);
+  double time_reduction = 1.0;
 
   std::memset(ss - 4, 0, 8 * sizeof(SearchStack));
   for (int i = 4; i > 0; --i)
@@ -384,12 +341,8 @@ Thread::search()
 
   if (main_thread)
   {
-    easy_move = EasyMove.get(root_pos_.key());
-    EasyMove.clear();
-    main_thread->easy_move_played = false;
     main_thread->failed_low = false;
     main_thread->best_move_changes = 0;
-    TT.new_search();
   }
 
   size_t multi_pv = Options["MultiPV"];
@@ -455,7 +408,6 @@ Thread::search()
         }
         else if (best_value >= beta)
         {
-          alpha = (alpha + beta) / 2;
           beta = std::min(best_value + delta, kValueInfinite);
         }
         else
@@ -486,8 +438,11 @@ Thread::search()
     if (!Signals.stop)
       completed_depth_ = root_depth_;
 
-    if (!main_thread)
-      continue;
+    if (root_moves_[0].pv[0] != last_best_move)
+    {
+      last_best_move = root_moves_[0].pv[0];
+      last_best_move_depth = root_depth_;
+    }
 
     if
     (
@@ -499,33 +454,37 @@ Thread::search()
     )
       Signals.stop = true;
 
+    if (!main_thread)
+      continue;
+
     if (Limits.use_time_management() && !Time.only_byoyomi())
     {
       if (!Signals.stop && !Signals.stop_on_ponder_hit)
       {
-        int failed_low = static_cast<int>(main_thread->failed_low);
-        int previous_score = static_cast<int>(best_value - main_thread->previous_score);
+        const int f[] = {main_thread->failed_low, best_value - main_thread->previous_score};
         int improving_factor =
           std::max
           (
             229,
-            std::min(715, 357 + 119 * failed_low - 6 * previous_score)
+            std::min(715, 357 + 119 * f[0] - 6 * f[1])
           );
+        Color us = root_pos_.side_to_move();
+        bool think_hard = DrawValue[us] == best_value && Limits.time[us] - Time.elapsed() > Limits.time[~us] && ::pv_is_draw(root_pos_);
         double unstable_pv_factor = 1 + main_thread->best_move_changes;
-        bool do_easy_move =
-          root_moves_[0].pv[0] == easy_move
-          &&
-          main_thread->best_move_changes < 0.03
-          &&
-          Time.elapsed() > Time.optimum() * 5 / 42;
+
+        time_reduction = 1;
+        for (int i : {3, 4, 5})
+        {
+          if (last_best_move_depth * i < completed_depth_ && !think_hard)
+            time_reduction *= 1.3;
+        }
+        unstable_pv_factor *= std::pow(main_thread->previous_time_reduction, 0.51) / time_reduction;
 
         if
         (
           root_moves_.size() == 1
           ||
           Time.elapsed() > Time.optimum() * unstable_pv_factor * improving_factor / 628
-          ||
-          (main_thread->easy_move_played = do_easy_move, do_easy_move)
         )
         {
           if (Limits.ponder)
@@ -534,19 +493,13 @@ Thread::search()
             Signals.stop = true;
         }
       }
-
-      if (root_moves_[0].pv.size() >= 3)
-        EasyMove.update(root_pos_, root_moves_[0].pv);
-      else
-        EasyMove.clear();
     }
   }
 
   if (!main_thread)
     return;
 
-  if (EasyMove.stable_count < 6 || main_thread->easy_move_played)
-    EasyMove.clear();
+  main_thread->previous_time_reduction = time_reduction;
 }
 
 Value
@@ -590,6 +543,7 @@ search
 
   Move pv[kMaxPly + 1];
   Move quiets_searched[64];
+  Move capture_searched[32];
   StateInfo st;
   TTEntry *tte;
   Key position_key;
@@ -615,14 +569,16 @@ search
   Piece moved_piece;
   int move_count;
   int quiet_count;
+  int capture_count;
 
   // Initialize node
   Thread *this_thread = pos.this_thread();
   in_check = pos.in_check();
-  move_count = quiet_count = ss->move_count = 0;
+  move_count = quiet_count = capture_count = ss->move_count = 0;
   best_value = -kValueInfinite;
   ss->ply = (ss - 1)->ply + 1;
   ss->history = 0;
+  position_key = pos.key();
 
   // 残り時間
   if (this_thread->reset_calls_.load(std::memory_order_relaxed))
@@ -701,7 +657,6 @@ search
   excluded_move = ss->excluded_move;
   if (excluded_move == kMoveNone)
   {
-    position_key = pos.key();
     tte = TT.probe(position_key, &tt_hit);
     tt_move = root_node
       ?
@@ -722,7 +677,6 @@ search
     tt_value = kValueZero;
     tt_hit = false;
     tte = nullptr;
-    position_key = 0;
   }
 
   // PV nodeのときはtransposition tableの手を使用しない
@@ -749,16 +703,10 @@ search
     {
       if (tt_value >= beta)
       {
-        if (!move_is_capture(tt_move))
-          update_stats
-          (
-            pos,
-            ss,
-            tt_move,
-            nullptr,
-            0,
-            stat_bonus(depth)
-          );
+        if (move_is_capture(tt_move))
+          update_capture_stats(pos, tt_move, nullptr, 0, stat_bonus(depth));
+        else
+          update_stats(pos, ss, tt_move, nullptr, 0, stat_bonus(depth));
 
         if ((ss - 1)->move_count == 1 && !move_is_capture((ss - 1)->current_move))
           update_cm_stats
@@ -834,6 +782,8 @@ search
   else
   {
     eval = ss->static_eval;
+    if (tte != nullptr)
+      tte->save(position_key, kValueNone, kBoundNone, kDepthNone, kMoveNone, TT.generation());
   }
 
   if (skip_early_pruning)
@@ -878,7 +828,7 @@ search
     &&
     eval >= beta
     &&
-    (ss->static_eval >= beta - 35 * (depth / kOnePly - 6) || depth >= 13 * kOnePly)
+    (ss->static_eval >= beta - 36 * depth / kOnePly + 225)
   )
   {
     ss->current_move  = kMoveNull;
@@ -929,17 +879,10 @@ search
   )
   {
     Value rbeta = std::min(beta + 200, kValueInfinite);
-    Depth rdepth = depth - 4 * kOnePly;
-
-    assert(rdepth >= kOnePly);
     assert((ss - 1)->current_move != kMoveNone);
     assert((ss - 1)->current_move != kMoveNull);
 
-    Value v = static_cast<Value>(Eval::ExchangePieceValueTable[move_capture((ss - 1)->current_move)]);
-    // 成る手ならそれをくわえておいた方がちょっとだけいい感じのようだ
-    if (move_is_promote((ss - 1)->current_move))
-      v += static_cast<Value>(Eval::PromotePieceValueTable[move_piece_type((ss - 1)->current_move)]);
-    MovePicker mp(pos, tt_move, v);
+    MovePicker mp(pos, tt_move, rbeta - ss->static_eval, &this_thread->capture_history_);
     CheckInfo ci(pos);
 
     while ((move = mp.next_move()) != kMoveNone)
@@ -957,10 +900,10 @@ search
             ss + 1,
             -rbeta,
             -rbeta + 1,
-            rdepth,
+            depth - 4 * kOnePly,
             !cut_node,
             false,
-            rdepth < 3 * kOnePly
+            depth - 4 * kOnePly < 3 * kOnePly
           );
         pos.undo_move(move);
         if (value >= rbeta)
@@ -1001,7 +944,7 @@ moves_loop:
   const CounterMoveStats &fmh = *(ss - 2)->counter_moves;
   const CounterMoveStats &fm2 = *(ss - 4)->counter_moves;
 
-  MovePicker mp(pos, tt_move, depth, ss);
+  MovePicker mp(pos, tt_move, depth, ss, &this_thread->capture_history_);
   CheckInfo ci(pos);
   value = best_value;
   improving =
@@ -1027,6 +970,7 @@ moves_loop:
     tte->depth() >= depth - 3 * kOnePly;
 
   Move current_best_move = kMoveNone;
+  bool tt_capture = false;
   // Loop through moves
   while ((move = mp.next_move()) != kMoveNone)
   {
@@ -1162,9 +1106,9 @@ moves_loop:
         )
           continue;
       }
-      else if (depth < 7 * kOnePly && !ext)
+      else if (depth < 7 * kOnePly && !ext && ((move_capture(move) & 0xF) < kSilver))
       {
-        Value v = -Value(400 - 100 * pv_node + 35 * depth / kOnePly * depth / kOnePly);
+        Value v = -Value(400 + 100 * depth / kOnePly);
         if (!pos.see_ge(move, v))
           continue;
       }
@@ -1177,6 +1121,9 @@ moves_loop:
       ss->move_count = --move_count;
       continue;
     }
+
+    if (move == tt_move && capture)
+      tt_capture = true;
 
     ss->current_move  = move;
     ss->counter_moves = &this_thread->counter_move_history_[moved_piece][move_to(move)];
@@ -1207,6 +1154,9 @@ moves_loop:
       }
       else
       {
+        if (tt_capture)
+          r += kOnePly;
+
         // cut_nodeの場合はreductionを増やす
         if (cut_node)
           r += kOnePly;
@@ -1370,6 +1320,8 @@ moves_loop:
 
     if (!capture && move != best_move && quiet_count < 64)
       quiets_searched[quiet_count++] = move;
+    else if (capture && move != best_move && capture_count < 32)
+      capture_searched[capture_count++] = move;
   }
 
   if (move_count == 0)
@@ -1383,16 +1335,10 @@ moves_loop:
   }
   else if (best_move != kMoveNone)
   {
-    if (!move_is_capture(best_move))
-      update_stats
-      (
-        pos,
-        ss,
-        best_move,
-        quiets_searched,
-        quiet_count,
-        stat_bonus(depth)
-      );
+    if (move_is_capture(best_move))
+      update_capture_stats(pos, best_move, capture_searched, capture_count, stat_bonus(depth));
+    else
+      update_stats(pos, ss, best_move, quiets_searched, quiet_count, stat_bonus(depth));
     
     if ((ss - 1)->move_count == 1 && !move_is_capture((ss - 1)->current_move))
       update_cm_stats
@@ -1421,7 +1367,7 @@ moves_loop:
     );
   }
 
-  if (excluded_move == kMoveNone)
+  if (excluded_move == kMoveNone && best_value != DrawValue[pos.side_to_move()])
     tte->save
     (
       position_key,
@@ -1487,7 +1433,7 @@ qsearch(Position &pos, SearchStack *ss, Value alpha, Value beta, Depth depth, bo
 
   ss->current_move = best_move = kMoveNone;
   ss->ply = (ss - 1)->ply + 1;
-
+#if REPETITION_CHECK_FULL
   Repetition repetition = ((ss - 1)->current_move != kMoveNull) ? pos.in_repetition() : kNoRepetition;
   if (repetition == kRepetition || ss->ply >= kMaxPly)
     return ss->ply >= kMaxPly && !InCheck ? evaluate(pos, ss) : DrawValue[pos.side_to_move()];
@@ -1516,7 +1462,10 @@ qsearch(Position &pos, SearchStack *ss, Value alpha, Value beta, Depth depth, bo
     else
       return kValueSamePosition;
   }
-
+#else
+  if (ss->ply >= kMaxPly)
+    return evaluate(pos, ss);
+#endif
   tt_depth =
     InCheck || depth >= kDepthQsChecks
     ?
@@ -1552,6 +1501,8 @@ qsearch(Position &pos, SearchStack *ss, Value alpha, Value beta, Depth depth, bo
     return tt_value;
   }
 
+  ss->static_eval = evaluate(pos, ss);
+
   // 現局面の静的評価
   if (InCheck)
   {
@@ -1578,7 +1529,6 @@ qsearch(Position &pos, SearchStack *ss, Value alpha, Value beta, Depth depth, bo
       }
     }
 
-    ss->static_eval = evaluate(pos, ss);
     if (tt_hit)
     {
       best_value = ss->static_eval;
@@ -1618,7 +1568,7 @@ qsearch(Position &pos, SearchStack *ss, Value alpha, Value beta, Depth depth, bo
     futility_base = best_value + 128;
   }
 
-  MovePicker mp(pos, tt_move, depth, move_to((ss - 1)->current_move));
+  MovePicker mp(pos, tt_move, depth, move_to((ss - 1)->current_move), &pos.this_thread()->capture_history_);
   CheckInfo ci(pos);
 
   while ((move = mp.next_move()) != kMoveNone)
@@ -1665,13 +1615,11 @@ qsearch(Position &pos, SearchStack *ss, Value alpha, Value beta, Depth depth, bo
     (
       (!InCheck || evasion_prunable)
       &&
+      (!gives_check || (move_capture(move) & 0xF) < kSilver)
+      &&
       !pos.see_ge(move, kValueZero)
     )
     {
-      if (!gives_check)
-        continue;
-
-      if ((move_capture(move) & 0xF) < kSilver)
         continue;
     }
 
@@ -1851,6 +1799,39 @@ update_stats
 }
 
 void
+update_capture_stats(const Position &pos, Move move, Move *captures, int capture_count, int bonus)
+{
+  CapturePieceToHistory &capture_histor = pos.this_thread()->capture_history_;
+  Piece moved_piece = move_piece(move, pos.side_to_move());
+  PieceType captured = move_capture(move);
+  capture_histor.update(moved_piece, move_to(move), captured, bonus);
+
+  for (int i = 0; i < capture_count; ++i)
+  {
+    moved_piece = move_piece(captures[i], pos.side_to_move());
+    captured = move_capture(captures[i]);
+    capture_histor.update(moved_piece, move_to(captures[i]), captured, -bonus);
+  }
+}
+
+bool
+pv_is_draw(Position &pos)
+{
+  StateInfo st[kMaxPly];
+  auto &pv = pos.this_thread()->root_moves_[0].pv;
+
+  for (size_t i = 0; i < pv.size(); ++i)
+    pos.do_move(pv[i], st[i]);
+
+  Repetition in_repetition = pos.in_repetition();
+
+  for (size_t i = pv.size(); i > 0; --i)
+    pos.undo_move(pv[i - 1]);
+
+  return in_repetition == kRepetition;
+}
+
+void
 check_time()
 {
   static TimePoint last_info_time = now();
@@ -1917,10 +1898,10 @@ usi_pv(const Position &pos, Depth depth, Value alpha, Value beta)
 
     ss << " nodes " << nodes_searched
        << " nps " << nodes_searched * 1000 / elapsed;
-#if 0
+
     if (elapsed > 1000) // Earlier makes little sense
       ss << " hashfull " << TT.hashfull();
-#endif
+
     ss << " time "      << elapsed
        << " pv";
 

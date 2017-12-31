@@ -2494,7 +2494,6 @@ search_mate1ply(Position &pos)
   Color color = pos.side_to_move();
   BitBoard target;
   Move move;
-  CheckInfo ci(pos);
 
   const BitBoard occupied = pos.occupied();
   if (pos.hand(color) != 0)
@@ -2505,6 +2504,7 @@ search_mate1ply(Position &pos)
       return move;
   }
 
+  CheckInfo ci(pos);
   target = ~pos.pieces(kOccupied, color);
   BitBoard movable = target & KingAttacksTable[pos.square_king(~color)];
 

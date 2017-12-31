@@ -87,10 +87,11 @@ MovePicker::MovePicker
   const Position &p,
   Move            ttm,
   Depth           d,
-  SearchStack    *s
+  SearchStack    *s,
+  const CapturePieceToHistory *cph
 )
 :
-pos_(p), ss_(s), depth_(d)
+pos_(p), ss_(s), capture_history_(cph), depth_(d)
 {
   assert(d > kDepthZero);
 
@@ -110,10 +111,11 @@ MovePicker::MovePicker
   const Position &p,
   Move            ttm,
   Depth           d,
-  Square          s
+  Square          s,
+  const CapturePieceToHistory *cph
 )
 :
-pos_(p)
+pos_(p), capture_history_(cph)
 {
   assert(d <= kDepthZero);
 
@@ -144,10 +146,11 @@ MovePicker::MovePicker
 (
   const Position &p,
   Move            ttm,
-  Value           th
+  Value           th,
+  const CapturePieceToHistory *cph
 )
 :
-pos_(p), threshold_(th)
+pos_(p), capture_history_(cph), threshold_(th)
 {
   assert(!pos_.in_check());
 
@@ -177,7 +180,9 @@ MovePicker::score<kCaptures>()
 {
   for (auto &m : *this)
   {
-    m.value = RawPieceValueTable[move_capture(m)];
+    PieceType capture = move_capture(m);
+    m.value = RawPieceValueTable[capture]
+     + (*capture_history_)[move_piece(m, pos_.side_to_move())][move_to(m)][capture];
   }
 }
 
@@ -254,6 +259,9 @@ MovePicker::next_move()
       move = pick_best(cur_++, end_moves_);
       if (move != tt_move_)
       {
+        if ((move_capture(move) & 0xF) >= kSilver && (cur_ - 1)->value > 1090)
+          return move;
+
         if (pos_.see_ge(move, kValueZero))
           return move;
 

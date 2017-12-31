@@ -99,3 +99,19 @@ TranspositionTable::probe(const Key key, bool *found) const
   return replace;
 }
 
+int
+TranspositionTable::hashfull() const
+{
+  int count = 0;
+  for (int i = 0; i < 1000 / kClusterSize; ++i)
+  {
+    const TTEntry *tte = &table_[i].entry[0];
+    for (int j = 0; j < kClusterSize; ++j)
+    {
+      if ((tte[j].generation_and_bound8_ & 0xFC) == generation_)
+        ++count;
+    }
+  }
+  return count;
+}
+
