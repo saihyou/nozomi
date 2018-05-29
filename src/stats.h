@@ -132,7 +132,8 @@ struct StatCubes : public std::array<std::array<std::array<T, kSize3>, kSize2>, 
   void
   update(T &entry, int bonus, const int d, const int w)
   {
-    assert(abs(bonus) <= d);
+    if (abs(bonus) >= 324)
+      return;
     assert(abs(w * d) < std::numeric_limits<T>().max());
 
     entry += bonus * w - entry * abs(bonus) / d;

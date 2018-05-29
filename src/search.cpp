@@ -87,7 +87,7 @@ futility_margin(Depth d, bool pv_node)
 int FutilityMoveCounts[2][16]; // [improving][depth]
 
 // 探索深さをどのくらい減らすか
-Depth Reductions[2][2][64][64][2] = {kDepthZero}; // [pv][improving][depth][move_number][gives_check]
+Depth Reductions[2][2][64][64][2] = {}; // [pv][improving][depth][move_number][gives_check]
 
 int LMRMoveCounts[16];
 
