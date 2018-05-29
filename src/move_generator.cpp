@@ -1544,6 +1544,23 @@ generate<kLegalForSearch>(const Position &pos, ExtMove *mlist)
   return end;
 }
 
+ExtMove *
+generate_recapture(const Position &pos, Square s, ExtMove *move)
+{
+  BitBoard target = MaskTable[s];
+  move = generate_pawn<false>(pos, target, move);
+  move = generate_lance<false>(pos, target, move);
+  move = generate_knight(pos, target, move);
+  move = generate_silver(pos, target, move);
+  move = generate_total_gold(pos, target, move);
+  move = generate_bishop<false>(pos, target, move);
+  move = generate_rook<false>(pos, target, move);
+  move = generate_horse(pos, target, move);
+  move = generate_dragon(pos, target, move);
+  move = generate_king(pos, target, move);
+  return move;
+}
+
 bool
 can_king_escape(const Position &pos, Square sq, const BitBoard &check_attack, Color color)
 {
@@ -1613,8 +1630,7 @@ can_piece_capture(const Position &pos, Square sq, const BitBoard &pinned, Color 
   attack.and_or(pos.total_gold(color), GoldAttacksTable[~color][sq]);
   attack.and_or(pos.pieces(kHorse, color) | pos.pieces(kDragon, color), KingAttacksTable[sq]);
   attack.and_or(pos.bishop_horse(color), bishop_attack(occupied, sq));
-  attack.and_or(pos.rook_dragon(color), rook_attack(occupied, sq));
-  attack.and_or(pos.pieces(kLance, color), lance_attack(occupied, ~color, sq));
+  attack.and_or((pos.rook_dragon(color) | (pos.pieces(kLance, color) & LanceAttacksTable[~color][sq][0])), rook_attack(occupied, sq));
 
   while (attack.test())
   {
@@ -1635,8 +1651,7 @@ can_piece_capture(const Position &pos, Square sq, Color color, const BitBoard &o
   attack.and_or(pos.total_gold(color), GoldAttacksTable[~color][sq]);
   attack.and_or(pos.pieces(kHorse, color) | pos.pieces(kDragon, color), KingAttacksTable[sq]);
   attack.and_or(pos.bishop_horse(color), bishop_attack(occupied, sq));
-  attack.and_or(pos.rook_dragon(color), rook_attack(occupied, sq));
-  attack.and_or(pos.pieces(kLance, color), lance_attack(occupied, ~color, sq));
+  attack.and_or((pos.rook_dragon(color) | (pos.pieces(kLance, color) & LanceAttacksTable[~color][sq][0])), rook_attack(occupied, sq));
 
   const BitBoard pinned = pos.pinned_pieces(color, occupied);
   while (attack.test())

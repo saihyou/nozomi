@@ -71,6 +71,7 @@ public:
   int    calls_count_;
 
   Eval::HashTable         eval_hash_;
+  Eval::KingCacheTable    king_cache_;
   Position                root_pos_;
   Search::RootMoveVector  root_moves_;
   Depth                   root_depth_;

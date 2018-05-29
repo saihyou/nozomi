@@ -24,6 +24,7 @@
 #include <cassert>
 #include "move_picker.h"
 #include "thread.h"
+#include "move_probability.h"
 
 namespace
 {
@@ -32,9 +33,8 @@ enum Stages
   kMainSearch, kCapturesInit, kGoodCaptures, kKillers, kCounterMove, kQuietInit, kQuiet, kBadCaptures,
   kEvasion, kEvasionsInit, kAllEvasions,
   kProbCut, kProbCutInit, kProbCutCaptures,
-  kQSearchWithChecks, kQCaptures1Init, kQCaptures1, kQChecks,
-  kQSearchNoChecks, kQCaptures2Init, kQCaptures2,
-  kQSearchRecaptures, kRecaptures
+  kQSearch, kQCapturesInit, kQCaptures, kQChecks,
+  kTotalSearch, kTotalInit, kTotal
 };
 
 constexpr int
@@ -57,19 +57,22 @@ RawPieceValueTable[kPieceTypeMax] =
   Eval::PieceValueTable[kRook]
 };
 
+constexpr int
+kProbSearchDepth = 16;
+
+
 void
 partial_insertion_sort(ExtMove *begin, ExtMove *end, int limit)
 {
-  for (ExtMove *sorted_end = begin + 1, *p = begin + 1; p < end; ++p)
+  for (ExtMove *sorted_end = begin, *p = begin + 1; p < end; ++p)
   {
     if (p->value >= limit)
     {
-      ExtMove tmp = *p;
-      ExtMove *q;
+      ExtMove tmp = *p, *q;
+      *p = *++sorted_end;
       for (q = sorted_end; q != begin && *(q - 1) < tmp; --q)
         *q = *(q - 1);
       *q = tmp;
-      ++sorted_end;
     }
   }
 }
@@ -85,13 +88,14 @@ pick_best(ExtMove *begin, ExtMove *end)
 MovePicker::MovePicker
 (
   const Position &p,
+  const CheckInfo *ci,
   Move            ttm,
   Depth           d,
   SearchStack    *s,
   const CapturePieceToHistory *cph
 )
 :
-pos_(p), ss_(s), capture_history_(cph), depth_(d)
+pos_(p), ci_(ci), ss_(s), capture_history_(cph), depth_(d)
 {
   assert(d > kDepthZero);
 
@@ -101,7 +105,18 @@ pos_(p), ss_(s), capture_history_(cph), depth_(d)
   killers_[0] = ss_->killers[0];
   killers_[1] = ss_->killers[1];
 
-  stage_ = pos_.in_check() ? kEvasion : kMainSearch;
+  if (pos_.in_check())
+  {
+    stage_ = kEvasion;
+  }
+  else if (d >= kProbSearchDepth * kOnePly)
+  {
+    stage_ = kTotalSearch;
+  }
+  else
+  {
+    stage_ = kMainSearch;
+  }
   tt_move_ = (ttm && pos_.pseudo_legal(ttm) ? ttm : kMoveNone);
   stage_ += (tt_move_ == kMoveNone);
 }
@@ -109,36 +124,34 @@ pos_(p), ss_(s), capture_history_(cph), depth_(d)
 MovePicker::MovePicker
 (
   const Position &p,
+  const CheckInfo *ci,
   Move            ttm,
   Depth           d,
   Square          s,
   const CapturePieceToHistory *cph
 )
 :
-pos_(p), capture_history_(cph)
+  pos_(p), ci_(ci), capture_history_(cph), depth_(d), recapture_square_(s)
 {
   assert(d <= kDepthZero);
 
-  if (pos_.in_check())
-  {
-    stage_ = kEvasion;
-  }
-  else if (d > kDepthQsNoChecks)
-  {
-    stage_ = kQSearchWithChecks;
-  }
-  else if (d > kDepthQsRecaptues)
-  {
-    stage_ = kQSearchNoChecks;
-  }
-  else
-  {
-    stage_ = kQSearchRecaptures;
-    recapture_square_ = s;
-    return;
-  }
-
-  tt_move_ = (ttm && pos_.pseudo_legal(ttm) ? ttm : kMoveNone);
+  stage_ = pos_.in_check() ? kEvasion : kQSearch;
+  tt_move_ =
+    (
+      ttm 
+      &&
+      pos_.pseudo_legal(ttm)
+      &&
+      (
+        depth_ > kDepthQsRecaptues
+        ||
+        move_to(ttm) == recapture_square_
+      )
+    )
+    ?
+    ttm
+    :
+    kMoveNone;
   stage_ += (tt_move_ == kMoveNone);
 }
 
@@ -233,7 +246,7 @@ MovePicker::score<kEvasions>()
 }
 
 Move
-MovePicker::next_move()
+MovePicker::next_move(int *value)
 {
   Move move;
 
@@ -241,9 +254,9 @@ MovePicker::next_move()
   {
   case kMainSearch:
   case kEvasion:
-  case kQSearchWithChecks:
-  case kQSearchNoChecks:
+  case kQSearch:
   case kProbCut:
+  case kTotalSearch:
     ++stage_;
     return tt_move_;
 
@@ -321,7 +334,7 @@ MovePicker::next_move()
     cur_ = end_bad_captures_;
     end_moves_ = generate<kQuiets>(pos_, cur_);
     score<kQuiets>();
-    partial_insertion_sort(cur_, end_moves_, -8000 * depth_ / kOnePly);
+    partial_insertion_sort(cur_, end_moves_, -4000 * depth_ / kOnePly);
     ++stage_;
 
   case kQuiet:
@@ -379,22 +392,23 @@ MovePicker::next_move()
     }
     break;
 
-  case kQCaptures1Init:
-  case kQCaptures2Init:
+  case kQCapturesInit:
     cur_ = moves_;
-    end_moves_ = generate<kCaptures>(pos_, cur_);
+    if (depth_ > kDepthQsRecaptues)
+      end_moves_ = generate<kCaptures>(pos_, cur_);
+    else
+      end_moves_ = generate_recapture(pos_, recapture_square_, cur_);
     score<kCaptures>();
     ++stage_;
 
-  case kQCaptures1:
-  case kQCaptures2:
+  case kQCaptures:
     while (cur_ < end_moves_)
     {
       move = pick_best(cur_++, end_moves_);
       if (move != tt_move_)
         return move;
     }
-    if (stage_ == kQCaptures2)
+    if (depth_ <= kDepthQsNoChecks)
       break;
     cur_ = moves_;
     end_moves_ = generate<kQuietChecks>(pos_, cur_);
@@ -409,21 +423,30 @@ MovePicker::next_move()
     }
     break;
 
-  case kQSearchRecaptures:
+  case kTotalInit:
     cur_ = moves_;
-    end_moves_ = generate<kCaptures>(pos_, cur_);
-    score<kCaptures>();
+    end_moves_ = generate<kNonEvasions>(pos_, cur_);
+    for (auto &m : *this)
+      m.value = MoveScore::evaluate(pos_, *ci_, m.move);
+    std::sort(cur_, end_moves_, [](const ExtMove &a, const ExtMove &b) { return a.value > b.value; });
+    max_value_ = cur_->value;
     ++stage_;
-    
-  case kRecaptures:
+
+  case kTotal:
     while (cur_ < end_moves_)
     {
-      move = pick_best(cur_++, end_moves_);
-      if (move_to(move) == recapture_square_)
+      move = cur_->move;
+      int v = cur_->value;
+      cur_++;
+      if (move != tt_move_)
+      {
+        if (value != nullptr)
+          *value = v - max_value_;
         return move;
+      }
     }
     break;
-    
+
   default:
     assert(false);
   }

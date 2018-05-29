@@ -275,7 +275,7 @@ Position::set(const std::string &sfen, Thread *t)
   {
     state_->black_kpp_list[list_index]         = kFHandPawn + i;
     state_->white_kpp_list[list_index]         = kEHandPawn + i;
-    state_->kpp_list_index[kBlackHandPawn + i] = list_index;
+    kpp_list_index_[kBlackHandPawn + i] = list_index;
     ++list_index;
   }
 
@@ -283,7 +283,7 @@ Position::set(const std::string &sfen, Thread *t)
   {
     state_->black_kpp_list[list_index]         = kEHandPawn + i;
     state_->white_kpp_list[list_index]         = kFHandPawn + i;
-    state_->kpp_list_index[kWhiteHandPawn + i] = list_index;
+    kpp_list_index_[kWhiteHandPawn + i] = list_index;
     ++list_index;
   }
 
@@ -291,7 +291,7 @@ Position::set(const std::string &sfen, Thread *t)
   {
     state_->black_kpp_list[list_index]          = kFHandLance + i;
     state_->white_kpp_list[list_index]          = kEHandLance + i;
-    state_->kpp_list_index[kBlackHandLance + i] = list_index;
+    kpp_list_index_[kBlackHandLance + i] = list_index;
     ++list_index;
   }
 
@@ -299,7 +299,7 @@ Position::set(const std::string &sfen, Thread *t)
   {
     state_->black_kpp_list[list_index]          = kEHandLance + i;
     state_->white_kpp_list[list_index]          = kFHandLance + i;
-    state_->kpp_list_index[kWhiteHandLance + i] = list_index;
+    kpp_list_index_[kWhiteHandLance + i] = list_index;
     ++list_index;
   }
 
@@ -307,7 +307,7 @@ Position::set(const std::string &sfen, Thread *t)
   {
     state_->black_kpp_list[list_index]           = kFHandKnight + i;
     state_->white_kpp_list[list_index]           = kEHandKnight + i;
-    state_->kpp_list_index[kBlackHandKnight + i] = list_index;
+    kpp_list_index_[kBlackHandKnight + i] = list_index;
     ++list_index;
   }
 
@@ -315,7 +315,7 @@ Position::set(const std::string &sfen, Thread *t)
   {
     state_->black_kpp_list[list_index]           = kEHandKnight + i;
     state_->white_kpp_list[list_index]           = kFHandKnight + i;
-    state_->kpp_list_index[kWhiteHandKnight + i] = list_index;
+    kpp_list_index_[kWhiteHandKnight + i] = list_index;
     ++list_index;
   }
 
@@ -323,7 +323,7 @@ Position::set(const std::string &sfen, Thread *t)
   {
     state_->black_kpp_list[list_index]           = kFHandSilver + i;
     state_->white_kpp_list[list_index]           = kEHandSilver + i;
-    state_->kpp_list_index[kBlackHandSilver + i] = list_index;
+    kpp_list_index_[kBlackHandSilver + i] = list_index;
     ++list_index;
   }
 
@@ -331,7 +331,7 @@ Position::set(const std::string &sfen, Thread *t)
   {
     state_->black_kpp_list[list_index]           = kEHandSilver + i;
     state_->white_kpp_list[list_index]           = kFHandSilver + i;
-    state_->kpp_list_index[kWhiteHandSilver + i] = list_index;
+    kpp_list_index_[kWhiteHandSilver + i] = list_index;
     ++list_index;
   }
 
@@ -339,7 +339,7 @@ Position::set(const std::string &sfen, Thread *t)
   {
     state_->black_kpp_list[list_index]         = kFHandGold + i;
     state_->white_kpp_list[list_index]         = kEHandGold + i;
-    state_->kpp_list_index[kBlackHandGold + i] = list_index;
+    kpp_list_index_[kBlackHandGold + i] = list_index;
     ++list_index;
   }
 
@@ -347,7 +347,7 @@ Position::set(const std::string &sfen, Thread *t)
   {
     state_->black_kpp_list[list_index]         = kEHandGold + i;
     state_->white_kpp_list[list_index]         = kFHandGold + i;
-    state_->kpp_list_index[kWhiteHandGold + i] = list_index;
+    kpp_list_index_[kWhiteHandGold + i] = list_index;
     ++list_index;
   }
 
@@ -355,7 +355,7 @@ Position::set(const std::string &sfen, Thread *t)
   {
     state_->black_kpp_list[list_index]           = kFHandBishop + i;
     state_->white_kpp_list[list_index]           = kEHandBishop + i;
-    state_->kpp_list_index[kBlackHandBishop + i] = list_index;
+    kpp_list_index_[kBlackHandBishop + i] = list_index;
     ++list_index;
   }
 
@@ -363,7 +363,7 @@ Position::set(const std::string &sfen, Thread *t)
   {
     state_->black_kpp_list[list_index]           = kEHandBishop + i;
     state_->white_kpp_list[list_index]           = kFHandBishop + i;
-    state_->kpp_list_index[kWhiteHandBishop + i] = list_index;
+    kpp_list_index_[kWhiteHandBishop + i] = list_index;
     ++list_index;
   }
 
@@ -371,7 +371,7 @@ Position::set(const std::string &sfen, Thread *t)
   {
     state_->black_kpp_list[list_index]         = kFHandRook + i;
     state_->white_kpp_list[list_index]         = kEHandRook + i;
-    state_->kpp_list_index[kBlackHandRook + i] = list_index;
+    kpp_list_index_[kBlackHandRook + i] = list_index;
     ++list_index;
   }
 
@@ -379,7 +379,7 @@ Position::set(const std::string &sfen, Thread *t)
   {
     state_->black_kpp_list[list_index]         = kEHandRook + i;
     state_->white_kpp_list[list_index]         = kFHandRook + i;
-    state_->kpp_list_index[kWhiteHandRook + i] = list_index;
+    kpp_list_index_[kWhiteHandRook + i] = list_index;
     ++list_index;
   }
 
@@ -387,7 +387,7 @@ Position::set(const std::string &sfen, Thread *t)
   {
     if (squares_[i] != kEmpty && squares_[i] != kBlackKing && squares_[i] != kWhiteKing)
     {
-      state_->kpp_list_index[i] = list_index;
+      kpp_list_index_[i] = list_index;
       state_->black_kpp_list[list_index] = PieceToIndexBlackTable[squares_[i]] + i;
       state_->white_kpp_list[list_index] = PieceToIndexWhiteTable[squares_[i]] + inverse((Square)i);
       ++list_index;
@@ -443,7 +443,7 @@ Position::do_move(Move m, StateInfo &new_state, bool gives_check)
   Square from = move_from(m);
   Square to = move_to(m);
 
-  std::memcpy(&new_state, state_, offsetof(StateInfo, list_index_capture));
+  std::memcpy(&new_state, state_, offsetof(StateInfo, board_key));
   new_state.previous = state_;
   state_ = &new_state;
 
@@ -465,11 +465,11 @@ Position::do_move(Move m, StateInfo &new_state, bool gives_check)
 
     assert(to < kBoardSquare);
     int hand_num   = number_of(hand_[us], drop) + 1;
-    int list_index = state_->kpp_list_index[PieceTypeToSquareHandTable[us][drop] + hand_num];
+    int list_index = kpp_list_index_[PieceTypeToSquareHandTable[us][drop] + hand_num];
     assert(list_index < 38);
     state_->black_kpp_list[list_index] = PieceToIndexBlackTable[squares_[to]] + to;
     state_->white_kpp_list[list_index] = PieceToIndexWhiteTable[squares_[to]] + inverse(to);
-    state_->kpp_list_index[to]         = list_index;
+    kpp_list_index_[to]         = list_index;
     state_->list_index_move            = list_index;
   }
   else
@@ -519,19 +519,19 @@ Position::do_move(Move m, StateInfo &new_state, bool gives_check)
         :
         -ExchangePieceValueTable[piece_capture];
 
-      int captured_index = state_->kpp_list_index[to];
+      int captured_index = kpp_list_index_[to];
       int hand_num       = number_of(hand_[us], piece_capture);
       state_->black_kpp_list[captured_index] = PieceTypeToBlackHandIndexTable[us][piece_capture] + hand_num;
       state_->white_kpp_list[captured_index] = PieceTypeToWhiteHandIndexTable[us][piece_capture] + hand_num;
-      state_->kpp_list_index[PieceTypeToSquareHandTable[us][piece_capture] + hand_num] = captured_index;
+      kpp_list_index_[PieceTypeToSquareHandTable[us][piece_capture] + hand_num] = captured_index;
       state_->list_index_capture = captured_index;
     }
 
     if (piece_move != kKing)
     {
-      int kpp_index = state_->kpp_list_index[from];
+      int kpp_index = kpp_list_index_[from];
       assert(kpp_index < 38);
-      state_->kpp_list_index[to] = kpp_index;
+      kpp_list_index_[to] = kpp_index;
       state_->black_kpp_list[kpp_index] = PieceToIndexBlackTable[squares_[to]] + to;
       state_->white_kpp_list[kpp_index] = PieceToIndexWhiteTable[squares_[to]] + inverse(to);
       state_->list_index_move = kpp_index;
@@ -591,6 +591,7 @@ Position::undo_move(Move move)
     add_hand(hand_[side_to_move_], drop);
     squares_[to] = kEmpty;
     piece_board_[side_to_move_][kOccupied].xor_bit(to);
+    kpp_list_index_[PieceTypeToSquareHandTable[side_to_move_][drop] + number_of(hand_[side_to_move_], drop)] = state_->list_index_move;
   }
   else
   {
@@ -612,6 +613,9 @@ Position::undo_move(Move move)
         square_king_[side_to_move_] = static_cast<Square>(from);
     }
 
+    if (piece_move != kKing)
+      kpp_list_index_[from] = state_->list_index_move;
+
     PieceType piece_capture = move_capture(move);
     if (piece_capture != kPieceNone)
     {
@@ -620,6 +624,7 @@ Position::undo_move(Move move)
       sub_hand(hand_[side_to_move_], piece_capture);
       squares_[to] = make_piece(piece_capture, enemy);
       piece_board_[enemy][kOccupied].xor_bit(to);
+      kpp_list_index_[to] = state_->list_index_capture;
     }
     else
     {
@@ -1144,10 +1149,6 @@ Position::see_ge(Move m, Value v, Color c) const
     if (next_victim == kKing)
       return true;
 
-    attackers = attacks_to(to, side_to_move, occupied);
-    if (!attackers.test())
-      return true;
-
     balance -= static_cast<Value>(ExchangePieceValueTable[next_victim]);
 
     if (balance >= v)
@@ -1160,10 +1161,6 @@ Position::see_ge(Move m, Value v, Color c) const
     if (balance < v)
       return false;
 
-    attackers = attacks_to(to, side_to_move, occupied);
-    if (!attackers.test())
-      return true;
-
     balance -= static_cast<Value>(ExchangePieceValueTable[next_victim]);
 
     if (balance >= v)
@@ -1171,7 +1168,7 @@ Position::see_ge(Move m, Value v, Color c) const
 
     occupied.xor_bit(to);
   }
-  attackers = (attackers | attacks_to(to, ~side_to_move, occupied)) & occupied;
+  attackers = attacks_to(to, occupied) & occupied;
 
   bool relative_side_to_move = true;
 

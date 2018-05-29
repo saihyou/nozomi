@@ -47,6 +47,9 @@ template<GenType>
 ExtMove *
 generate(const Position &pos, ExtMove *mlist);
 
+ExtMove *
+generate_recapture(const Position &pos, Square s, ExtMove *move);
+
 Move
 search_mate1ply(Position &pos);
 

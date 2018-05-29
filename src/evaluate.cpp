@@ -29,10 +29,15 @@
 #include "search.h"
 #include "misc.h"
 
+#define USE_SIMD
+
 namespace Eval
 {
 int16_t KPP[kBoardSquare][kFEEnd][kFEEnd];
 int16_t KKPT[kBoardSquare][kBoardSquare][kFEEnd][kNumberOfColor];
+
+constexpr int
+kKingBrotherDiffSize = 7;
 
 void
 calc_full(const Position &pos, EvalParts &parts)
@@ -65,6 +70,34 @@ calc_full(const Position &pos, EvalParts &parts)
   parts.black_kpp = static_cast<Value>(black_kpp);
   parts.white_kpp = static_cast<Value>(white_kpp);
   parts.kkpt      = static_cast<Value>(kkpt);
+}
+
+Value
+calc_part(Square king, const KPPIndex *current, const KPPIndex *before, const int *index, int num)
+{
+  int value = 0;
+  for (int i = 0; i < num; ++i)
+  {
+    const auto kpp_current = KPP[king][current[index[i]]];
+    const auto kpp_before  = KPP[king][before[index[i]]];
+    for (int j = 0; j < kListNum; ++j)
+    {
+      value += kpp_current[current[j]];
+      value -= kpp_before[before[j]];
+    }
+  }
+
+  for (int i = 1; i < num; ++i)
+  {
+    const auto kpp_current = KPP[king][current[index[i]]];
+    const auto kpp_before = KPP[king][before[index[i]]];
+    for (int j = 0; j < i; ++j)
+    {
+      value -= kpp_current[current[index[j]]];
+      value += kpp_before[before[index[j]]];
+    }
+  }
+  return Value(value);
 }
 
 void
@@ -308,6 +341,24 @@ calc_difference_king_move_no_capture(const Position &pos, const EvalParts &last_
   parts.kkpt = static_cast<Value>(kkpt);
 }
 
+#if defined (_MSC_VER)
+uint32_t
+first_one(uint64_t b)
+{
+  unsigned long index = 0;
+
+  _BitScanForward64(&index, b);
+  return index;
+}
+#else
+uint32_t
+first_one(uint64_t b)
+{
+  return __builtin_ctzll(b);
+}
+#endif
+
+
 void
 calc_difference(const Position &pos, Move last_move, const EvalParts &last_parts, EvalParts &parts)
 {
@@ -316,19 +367,142 @@ calc_difference(const Position &pos, Move last_move, const EvalParts &last_parts
 
   if (type == kKing)
   {
+    Color enemy = ~pos.side_to_move();
+    Square king = pos.square_king(enemy);
+    auto list = (pos.side_to_move() == kBlack) ? pos.white_kpp_list() : pos.black_kpp_list();
+    auto entry = pos.this_thread()->king_cache_.get_list(enemy, king);
+    auto cache_value = pos.this_thread()->king_cache_.get_value(enemy, king);
+    int count = 0;
+    int index[kKingBrotherDiffSize];
+#ifdef USE_SIMD
+    if (cache_value != kValueZero)
+    {
+      // listの一致しない箇所のbitを立てる
+      uint64_t bit = 0;
+      for (int i = 0; i < 2; ++i)
+      {
+        __m256i current = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(list + i * 16));
+        __m256i old = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(entry + i * 16));
+        // 現在と保存してあるlistを比較する
+        // 一致する箇所は全て1となり一致しない箇所は全て0で埋まる
+        __m256i cmp = _mm256_cmpeq_epi16(current, old);
+        // __m256iを__m128iに分ける
+        __m128i ext0 = _mm256_extracti128_si256(cmp, 0);
+        __m128i ext1 = _mm256_extracti128_si256(cmp, 1);
+        // 16bit -> 8bitに変換する
+        __m128i pack = _mm_packs_epi16(ext0, ext1);
+        // 一致しない箇所を1にするためnotをとる
+        pack = _mm_andnot_si128(pack, _mm_set1_epi8(-1));
+        // 1bitだけあればよいので最上位bitを抽出する
+        bit |= (static_cast<uint64_t>(_mm_movemask_epi8(pack)) << i * 16);
+      }
+      {
+        __m128i current = _mm_set_epi16(0, 0, list[37],list[36], list[35] ,list[34] ,list[33] ,list[32]);
+        __m128i old = _mm_set_epi16(0, 0, entry[37], entry[36], entry[35], entry[34], entry[33], entry[32]);
+        __m128i cmp = _mm_cmpeq_epi16(current, old);
+        __m128i pack = _mm_packs_epi16(cmp, _mm_set1_epi8(-1));
+        pack = _mm_andnot_si128(pack, _mm_set1_epi8(-1));
+        bit |= (static_cast<uint64_t>(_mm_movemask_epi8(pack)) << 32);
+      }
+      if (_mm_popcnt_u64(bit) < kKingBrotherDiffSize)
+      {
+        while (bit != 0)
+        {
+          uint32_t p = first_one(bit);
+          index[count++] = p;
+          bit ^= (1LLU << p);
+        }
+      }
+      else
+      {
+        cache_value = kValueZero;
+      }
+    }
+#else
+    if (cache_value != kValueZero)
+    {
+      for (int i = 0; i < kListNum; ++i)
+      {
+        if (entry[i] != list[i])
+        {
+          if (count == kKingBrotherDiffSize)
+          {
+            cache_value = kValueZero;
+            break;
+          }
+          index[count++] = i;
+        }
+      }
+    }
+#endif
     if (move_capture(last_move) == kPieceNone)
     {
-      if (pos.side_to_move() == kBlack)
-        calc_difference_king_move_no_capture<kWhite>(pos, last_parts, parts);
-      else
-        calc_difference_king_move_no_capture<kBlack>(pos, last_parts, parts);
+      if (cache_value == kValueZero)
+      {
+        if (pos.side_to_move() == kBlack)
+          calc_difference_king_move_no_capture<kWhite>(pos, last_parts, parts);
+        else
+          calc_difference_king_move_no_capture<kBlack>(pos, last_parts, parts);
     }
     else
     {
-      if (pos.side_to_move() == kBlack)
-        calc_difference_king_move_capture<kWhite>(pos, last_parts, parts);
+        if (enemy == kBlack)
+        {
+          parts.black_kpp = cache_value;
+          if (count != 0)
+            parts.black_kpp += calc_part(king, pos.black_kpp_list(), entry, index, count);
+          parts.white_kpp = last_parts.white_kpp;
+          parts.kkpt      = calc_kkpt_value(pos);
+        }
+        else
+        {
+          parts.black_kpp = last_parts.black_kpp;
+          parts.white_kpp = cache_value;
+          if (count != 0)
+            parts.white_kpp -= calc_part(inverse(king), pos.white_kpp_list(), entry, index, count);
+          parts.kkpt = calc_kkpt_value(pos);
+        }
+      }
+    }
+    else
+    {
+      if (cache_value == kValueZero)
+      {
+        if (pos.side_to_move() == kBlack)
+          calc_difference_king_move_capture<kWhite>(pos, last_parts, parts);
+        else
+          calc_difference_king_move_capture<kBlack>(pos, last_parts, parts);
+      }
       else
-        calc_difference_king_move_capture<kBlack>(pos, last_parts, parts);
+      {
+        if (enemy == kBlack)
+        {
+          parts.black_kpp = cache_value;
+          if (count != 0)
+            parts.black_kpp += calc_part(king, pos.black_kpp_list(), entry, index, count);
+          int cap = pos.list_index_capture();
+          parts.white_kpp = last_parts.white_kpp - calc_part(inverse(pos.square_king(kWhite)), pos.white_kpp_list(), pos.prev_white_kpp_list(), &cap, 1);
+          parts.kkpt = calc_kkpt_value(pos);
+        }
+        else
+        {
+          int cap = pos.list_index_capture();
+          parts.black_kpp = last_parts.black_kpp + calc_part(pos.square_king(kBlack), pos.black_kpp_list(), pos.prev_black_kpp_list(), &cap, 1);
+          parts.white_kpp = cache_value;
+          if (count != 0)
+            parts.white_kpp -= calc_part(inverse(king), pos.white_kpp_list(), entry, index, count);
+          parts.kkpt = calc_kkpt_value(pos);
+        }
+      }
+    }
+
+    // 差分がない場合はコピーしないようにする
+    // ただほとんどないので意味がないかも
+    if (cache_value == kValueZero)
+    {
+      pos.this_thread()->king_cache_.set_list(enemy, king, list);
+      auto v = (pos.side_to_move() == kBlack) ? parts.white_kpp : parts.black_kpp;
+      pos.this_thread()->king_cache_.set_value(enemy, king, v);
     }
   }
   else
@@ -409,7 +583,7 @@ evaluate(const Position &pos, SearchStack *ss)
 #ifdef LEARN
   return score;
 #else
-  return score + 20;
+  return score + 2 * ss->ply;
 #endif
 }
   

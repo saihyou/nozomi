@@ -149,6 +149,9 @@ search(Position &pos, SearchStack *ss, Value alpha, Value beta, Depth depth);
 
 Value
 qsearch(Position &pos, SearchStack *ss, Value alpha, Value beta);
+
+bool
+pv_is_draw(Position &pos);
 } // namespace
 
 

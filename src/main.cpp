@@ -29,6 +29,7 @@
 #include "learn.h"
 #include "reinforcer.h"
 #include "kifu_maker.h"
+#include "move_probability.h"
 #ifdef APERY_BOOK
 #include "apery_book.h"
 #endif
@@ -45,6 +46,7 @@ main(int argc, char* argv[])
   Search::init();
   Eval::init();
   Threads.init();
+  MoveScore::init();
 
   TT.resize(Options["USI_Hash"]);
 
@@ -80,6 +82,12 @@ main(int argc, char* argv[])
   else if (type == "kifu")
   {
     KifuMaker::make(is);
+  }
+  else if (type == "prob")
+  {
+    MoveScore::init();
+    MoveScore::reinforce(is);
+    MoveScore::read("test.txt");
   }
 #endif
   Threads.exit();

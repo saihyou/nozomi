@@ -55,7 +55,6 @@ struct StateInfo
   int material;
   int pilies_from_null;
   int continuous_checks[kNumberOfColor];
-  uint8_t  kpp_list_index[kSquareHand];
   Eval::KPPIndex black_kpp_list[Eval::kListNum];
   Eval::KPPIndex white_kpp_list[Eval::kListNum];
   uint8_t list_index_move;
@@ -163,6 +162,9 @@ public:
 
   BitBoard 
   attacks_to(Square sq, Color color, const BitBoard &occupied) const;
+  BitBoard
+  attacks_to(Square sq, const BitBoard &occupied) const;
+
 
   uint64_t
   key() const;
@@ -235,6 +237,7 @@ private:
   Hand       hand_[kNumberOfColor];
   Piece      squares_[kBoardSquare];
   Square     square_king_[kNumberOfColor];
+  uint8_t    kpp_list_index_[kSquareHand];
   Color      side_to_move_;
   StateInfo  start_state_;
   uint64_t   nodes_searched_;
@@ -395,13 +398,45 @@ Position::attacks_to(Square sq, Color color, const BitBoard &occupied) const
   Color enemy = ~color;
   BitBoard bb = piece_board_[color][kPawn] & PawnAttacksTable[enemy][sq];
 
-  bb.and_or(piece_board_[color][kLance], lance_attack(occupied, enemy, sq));
   bb.and_or(piece_board_[color][kKnight], KnightAttacksTable[enemy][sq]);
   bb.and_or(piece_board_[color][kSilver], SilverAttacksTable[enemy][sq]);
   bb.and_or(total_gold(color), GoldAttacksTable[enemy][sq]);
   bb.and_or(horse_dragon_king(color), KingAttacksTable[sq]);
   bb.and_or(bishop_horse(color), bishop_attack(occupied, sq));
-  bb.and_or(rook_dragon(color), rook_attack(occupied, sq));
+  bb.and_or((rook_dragon(color) | (piece_board_[color][kLance] & LanceAttacksTable[enemy][sq][0])), rook_attack(occupied, sq));
+
+  return bb;
+}
+
+FORCE_INLINE
+BitBoard
+Position::attacks_to(Square sq, const BitBoard &occupied) const
+{
+  Color color = side_to_move_;
+  Color enemy = ~side_to_move_;
+  BitBoard bb = piece_board_[color][kPawn] & PawnAttacksTable[enemy][sq];
+
+  bb.and_or(piece_board_[color][kKnight], KnightAttacksTable[enemy][sq]);
+  bb.and_or(piece_board_[color][kSilver], SilverAttacksTable[enemy][sq]);
+  bb.and_or(total_gold(color), GoldAttacksTable[enemy][sq]);
+  bb.and_or(piece_board_[enemy][kPawn], PawnAttacksTable[color][sq]);
+  bb.and_or(piece_board_[enemy][kKnight], KnightAttacksTable[color][sq]);
+  bb.and_or(piece_board_[enemy][kSilver], SilverAttacksTable[color][sq]);
+  bb.and_or(total_gold(enemy), GoldAttacksTable[color][sq]);
+
+  bb.and_or((horse_dragon_king(color) | horse_dragon_king(enemy)), KingAttacksTable[sq]);
+  bb.and_or((bishop_horse(color) | bishop_horse(enemy)), bishop_attack(occupied, sq));
+  bb.and_or
+  (
+    (
+      (rook_dragon(color) | rook_dragon(enemy))
+      |
+      (piece_board_[color][kLance] & LanceAttacksTable[enemy][sq][0])
+      |
+      (piece_board_[enemy][kLance] & LanceAttacksTable[color][sq][0])
+    ),
+    rook_attack(occupied, sq)
+  );
 
   return bb;
 }
@@ -414,13 +449,12 @@ Position::is_attacked(Square sq, Color color, const BitBoard &occupied) const
   Color enemy = ~color;
   BitBoard bb = piece_board_[enemy][kPawn] & PawnAttacksTable[color][sq];
 
-  bb.and_or(piece_board_[enemy][kLance], lance_attack(occupied, color, sq));
   bb.and_or(piece_board_[enemy][kKnight], KnightAttacksTable[color][sq]);
   bb.and_or(piece_board_[enemy][kSilver], SilverAttacksTable[color][sq]);
   bb.and_or(total_gold(enemy), GoldAttacksTable[color][sq]);
   bb.and_or(horse_dragon_king(enemy), KingAttacksTable[sq]);
   bb.and_or(bishop_horse(enemy), bishop_attack(occupied, sq));
-  bb.and_or(rook_dragon(enemy), rook_attack(occupied, sq));
+  bb.and_or(rook_dragon(enemy) | (piece_board_[enemy][kLance] & LanceAttacksTable[color][sq][0]), rook_attack(occupied, sq));
 
   return bb.test();
 }

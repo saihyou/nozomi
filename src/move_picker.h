@@ -41,10 +41,10 @@ public:
   MovePicker &operator=(const MovePicker &) = delete;
 
   MovePicker(const Position &, Move, Value, const CapturePieceToHistory *);
-  MovePicker(const Position &, Move, Depth, Square, const CapturePieceToHistory *);
-  MovePicker(const Position &, Move, Depth, SearchStack *, const CapturePieceToHistory *);
+  MovePicker(const Position &, const CheckInfo *, Move, Depth, Square, const CapturePieceToHistory *);
+  MovePicker(const Position &, const CheckInfo *, Move, Depth, SearchStack *, const CapturePieceToHistory *);
 
-  Move next_move();
+  Move next_move(int *value = nullptr);
 
 private:
   template<GenType> void score();
@@ -62,6 +62,7 @@ private:
   }
 
   const Position         &pos_;
+  const CheckInfo        *ci_;
   const SearchStack      *ss_;
   const CapturePieceToHistory *capture_history_;
   Move                    killers_[2];
@@ -70,6 +71,7 @@ private:
   Move                    tt_move_;
   Square                  recapture_square_;
   Value                   threshold_;
+  int                     max_value_ = 0;
   int                     stage_;
   ExtMove                *end_bad_captures_;
   ExtMove                *cur_;

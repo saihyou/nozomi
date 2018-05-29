@@ -18,6 +18,7 @@
 
 #include <string>
 #include <vector>
+#include <unordered_map>
 #include "kifu_maker.h"
 #include "reinforcer.h"
 #include "transposition_table.h"
@@ -28,11 +29,11 @@ namespace KifuMaker
 {
 // 探索深さ
 constexpr Depth
-kSearchDepth = Depth(8);
+kSearchDepth = Depth(12);
 
 // 探索打ち切りの点数
 constexpr Value
-kWinValue = Value(5000);
+kWinValue = Value(30000);
 
 // book局面からkMinRandamMove以上kMaxRandamMove以下の数、ランダムムーブで動かし
 // 探索の初期局面を生成する
@@ -129,10 +130,10 @@ search(Position &pos, size_t multi_pv, Depth search_depth)
   if (thread->root_moves_.empty())
     return false;
 
-  Search::DrawValue[pos.side_to_move()] = -kValueSamePosition;
-  Search::DrawValue[~pos.side_to_move()] = kValueSamePosition;
+  Search::DrawValue[pos.side_to_move()] = -kValueDraw;
+  Search::DrawValue[~pos.side_to_move()] = kValueDraw;
   Value v;
-  for (Depth d = kDepthZero + 1; d <= search_depth; ++d)
+  for (thread->root_depth_ = kDepthZero + 1; thread->root_depth_ <= search_depth; ++thread->root_depth_)
   {
     Value alpha = -kValueInfinite;
     Value beta = kValueInfinite;
@@ -151,7 +152,7 @@ search(Position &pos, size_t multi_pv, Depth search_depth)
 
       while (true)
       {
-        v = Search::search(pos, ss, -kValueInfinite, kValueInfinite, d);
+        v = Search::search(pos, ss, alpha, beta, thread->root_depth_);
         std::stable_sort(thread->root_moves_.begin(), thread->root_moves_.end());
 
         if (v <= alpha)
@@ -184,9 +185,11 @@ play_game(std::vector<PositionData> &position_list, std::vector<std::vector<std:
 {
   std::random_device rnd;
   std::mt19937 mt(rnd());
+  std::unordered_map<Key, bool> hash_map;
   Search::StateStackPtr state = Search::StateStackPtr(new std::stack<StateInfo>());
   Position pos;
   pos.set("lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1", Threads[0]);
+  hash_map[pos.key()] = true;
   Thread *thread = pos.this_thread();
 
   if (book.empty())
@@ -222,6 +225,7 @@ play_game(std::vector<PositionData> &position_list, std::vector<std::vector<std:
       }
       state->push(StateInfo());
       pos.do_move(thread->root_moves_[index].pv[0], state->top());
+      hash_map[pos.key()] = true;
     }
   }
   else
@@ -237,10 +241,16 @@ play_game(std::vector<PositionData> &position_list, std::vector<std::vector<std:
         return;
       state->push(StateInfo());
       pos.do_move(m, state->top());
+      hash_map[pos.key()] = true;
     }
 
-    std::uniform_int_distribution<> g(kMinRandamMove, kMaxRandamMove);
-    int randam_end = g(mt);
+    int randam_end = 1;
+    if (moves.size() > 30)
+    {
+      std::uniform_int_distribution<> g(0, 1);
+      randam_end = g(mt);
+    }
+
     for (int i = 0; i < randam_end; ++i)
     {
       Move m = pick_randam_move(pos, mt);
@@ -249,6 +259,7 @@ play_game(std::vector<PositionData> &position_list, std::vector<std::vector<std:
 
       state->push(StateInfo());
       pos.do_move(m, state->top());
+      hash_map[pos.key()] = true;
     }
   }
 
@@ -272,25 +283,22 @@ play_game(std::vector<PositionData> &position_list, std::vector<std::vector<std:
   PositionData d;
   d.sfen = USI::to_sfen(pos);
   d.value = initial_value;
+  d.next_move = USI::format_move(thread->root_moves_[0].pv[0]);
   game.push_back(d);
   state->push(StateInfo());
   pos.do_move(thread->root_moves_[0].pv[0], state->top());
+  hash_map[pos.key()] = true;
 
-  Color win;
+  Color win = kNoColor;
   while (true)
   {
-    search(pos, 1, kSearchDepth);
-    Value v = thread->root_moves_[0].score;
-    if (v < -kWinValue || v > kWinValue)
+    TT.new_search();
+    if (!search(pos, 1, kSearchDepth))
     {
-      if (v < -kWinValue)
-        win = ~pos.side_to_move();
-      else if (v > kWinValue)
-        win = pos.side_to_move();
-      else
-        win = kNoColor;
+      win = ~pos.side_to_move();
       break;
     }
+    Value v = thread->root_moves_[0].score;
 
     if (pos.game_ply() > 1000)
     {
@@ -306,9 +314,14 @@ play_game(std::vector<PositionData> &position_list, std::vector<std::vector<std:
     PositionData data;
     data.value = v;
     data.sfen = USI::to_sfen(pos);
+    data.next_move = USI::format_move(thread->root_moves_[0].pv[0]);
     game.push_back(data);
     state->push(StateInfo());
     pos.do_move(thread->root_moves_[0].pv[0], state->top());
+    if (hash_map[pos.key()])
+      break;
+
+    hash_map[pos.key()] = true;
   }
 
   if (win != kNoColor)
@@ -337,6 +350,7 @@ make(std::istringstream &is)
   std::vector<PositionData> position_list;
   int count = 0;
   int write_count = 0;
+  Options["USI_Hash"] = 512;
   while (true)
   {
     play_game(position_list, book);
@@ -360,6 +374,7 @@ make(std::istringstream &is)
           out_file << ",w";
         else
           out_file << ",d";
+        out_file << "," << m.next_move;
         out_file << std::endl;
       }
       out_file.close();

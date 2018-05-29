@@ -20,6 +20,7 @@
 #define _EVALUATE_H_
 
 #include <array>
+#include <cstring>
 
 #include "types.h"
 #include "move.h"
@@ -66,7 +67,10 @@ enum KPPIndex : int16_t
   kFDragon = kERook + 81,
   kEDragon = kFDragon + 81,
   kFEEnd = kEDragon + 81,
-  kFENone = kFEEnd
+  kFENone = kFEEnd,
+  kFKing = kEDragon + 81,
+  kEKing = kFKing + 81,
+  kScoreEnd = kEKing + 81
 };
 
 inline KPPIndex
@@ -86,7 +90,7 @@ PieceToIndexBlackTable[kPieceMax] =
   kFBishop, // kBlackBishop
   kFRook,   // kBlackRook
   kFGold,   // kBlackGold
-  kFENone,  // kBlackKing
+  kFKing,   // kBlackKing
   kFGold,   // kBlackPromotedPawn
   kFGold,   // kBlackPromotedLance
   kFGold,   // kBlackPromotedKnight
@@ -102,7 +106,7 @@ PieceToIndexBlackTable[kPieceMax] =
   kEBishop, // kWhiteBishop
   kERook,   // kWhiteRook
   kEGold,   // kWhiteGold
-  kFENone,  // kWhiteKing
+  kEKing,  // kWhiteKing
   kEGold,   // kWhitePromotedPawn
   kEGold,   // kWhitePromotedLance
   kEGold,   // kWhitePromotedKnight
@@ -309,7 +313,7 @@ ExchangePieceValueTable[kPieceTypeMax] =
   PieceValueTable[kDragon] + PieceValueTable[kRook]
 };
 
-constexpr int kTableSize = 65536;
+constexpr int kTableSize = 131072;
 
 struct EvalParts
 {
@@ -341,6 +345,38 @@ kListNum = 38;
 
 constexpr int
 kFvScale = 32;
+
+class KingCacheTable
+{
+public:
+  void
+  set_list(Color c, Square k, KPPIndex *list)
+  {
+    std::memcpy(table_[c][k], list, sizeof(KPPIndex) * kListNum);
+  }
+
+  void
+  set_value(Color c, Square k, Value v)
+  {
+    value_[c][k] = v;
+  }
+
+  const KPPIndex *
+  get_list(Color c, Square k) const
+  {
+    return table_[c][k];
+  }
+
+  Value
+  get_value(Color c, Square k) const
+  {
+    return value_[c][k];
+  }
+
+private:
+  KPPIndex table_[kNumberOfColor][kBoardSquare][kListNum];
+  Value    value_[kNumberOfColor][kBoardSquare] = {{kValueZero}};
+};
 
 inline Square
 inverse(Square sq)

@@ -107,7 +107,7 @@ class TranspositionTable
   kCacheLineSize = 64;
   
   static const int
-  kClusterSize = 5;
+  kClusterSize = 4;
 
   struct Cluster 
   {

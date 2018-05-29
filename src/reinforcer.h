@@ -25,26 +25,28 @@
 #include "stats.h"
 #include "learn.h"
 
-#define DOUBLE_COST
+using LearnFloatingPoint = float;
+
 
 struct PositionData
 {
   std::string sfen;
   Value       value;
   Color       win;
+  std::string next_move;
 };
 
 struct Gradient
 {
-  double kpp[kBoardSquare][Eval::kFEEnd][Eval::kFEEnd];
-  double kkpt[kBoardSquare][kBoardSquare][Eval::kFEEnd][kNumberOfColor];
+  std::atomic<LearnFloatingPoint> kpp[kBoardSquare][Eval::kFEEnd][Eval::kFEEnd];
+  std::atomic<LearnFloatingPoint> kkpt[kBoardSquare][kBoardSquare][Eval::kFEEnd][kNumberOfColor];
+  std::atomic<int> kpp_count[kBoardSquare][Eval::kFEEnd][Eval::kFEEnd];
+  std::atomic<int> kkpt_count[kBoardSquare][kBoardSquare][Eval::kFEEnd][kNumberOfColor];
 
-  void increment(const Position &pos, double delta);
+  void increment(const Position &pos, LearnFloatingPoint delta);
   void clear();
 };
 
-Gradient & 
-operator+=(Gradient &lhs, Gradient &rhs);
 
 class Reinforcer
 {
@@ -55,25 +57,15 @@ private:
   void   update_param(const std::string &record_file_name, int num_threads);
   void   compute_gradient(std::vector<PositionData> &position_list);
   size_t read_file(std::ifstream &ifs, std::vector<PositionData> &position_list, size_t num_positions, bool &eof);
-#ifdef DOUBLE_COST
-  void   add_param(const Gradient &param1, const Gradient &param2);
-#else
   void   add_param(const Gradient &param1);
-#endif
   void   load_param();
   void   save_param();
   int                                    batch_size_;
   std::vector<std::string>               game_list_;
   std::vector<Position>                  positions_;
-#ifdef DOUBLE_COST
-  std::vector<std::unique_ptr<Gradient>> win_gradients_;
-  std::vector<std::unique_ptr<Gradient>> value_gradients_;
-  double                                 win_diff_;
-  double                                 value_diff_;
-#else
-  std::vector<std::unique_ptr<Gradient>> gradients_;
-  double                                 all_diff_;
-#endif
+  std::unique_ptr<Gradient>              gradient_;
+  LearnFloatingPoint                     win_diff_;
+  LearnFloatingPoint                     value_diff_;
 };
 
 #endif
