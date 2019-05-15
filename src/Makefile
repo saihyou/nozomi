@@ -1,6 +1,6 @@
 OBJS = bit_board.o move_generator.o position.o usi.o usioption.o misc.o thread.o timeman.o transposition_table.o move_picker.o evaluate.o search.o move_probability.o benchmark.o book.o main.o
 
-CPPFLAGS = -Wall -std=c++11 -DHAVE_SSE4 -march=native
+CPPFLAGS = -Wall -std=c++1z -DHAVE_SSE4 -march=native
 LDFLAGS = -pthread
 
 ifdef DEBUG
@@ -11,13 +11,13 @@ endif
 
 ifdef LEARN
 CPPFLAGS += -fopenmp -DLEARN
-OBJS += learn.o reinforcer.o kifu_maker.o
+OBJS += reinforcer.o kifu_maker.o
 LDFLAGS += -fopenmp
 endif
 
 ifdef UPDATE
 CPPFLAGS += -fopenmp -DLEARN -DDISABLE_TT -DREPETITION_CHECK_FULL
-OBJS += learn.o reinforcer.o kifu_maker.o
+OBJS += reinforcer.o kifu_maker.o
 LDFLAGS += -fopenmp
 endif
 

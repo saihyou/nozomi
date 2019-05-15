@@ -53,6 +53,8 @@ public:
   virtual void
   search();
 
+  void Clear();
+
   void
   idle_loop();
 
@@ -69,30 +71,26 @@ public:
   size_t pv_index_;
   int    max_ply_;
   int    calls_count_;
+  std::atomic<uint64_t> best_move_changes_;
 
   Eval::HashTable         eval_hash_;
-  Eval::KingCacheTable    king_cache_;
+  Eval::KppListTable    kpp_list_;
   Position                root_pos_;
   Search::RootMoveVector  root_moves_;
   Depth                   root_depth_;
-  FromToStats             from_to_;
   Depth                   completed_depth_;
   std::atomic_bool        reset_calls_;
-  HistoryStats            history_;
-  MovesStats              counter_moves_;
-  CounterMoveHistoryStats counter_move_history_;
-  CapturePieceToHistory   capture_history_;
+  CounterMoveHistory counter_moves_;
+  ButterflyHistory main_history_;
+  CapturePieceToHistory capture_history_;
+  ContinuationHistory continuation_history_;
 };
 
-struct MainThread : public Thread
-{
-  virtual void
-  search();
+struct MainThread : public Thread {
+  void search() override;
 
-  bool   failed_low;
-  double best_move_changes;
   double previous_time_reduction;
-  Value  previous_score;
+  Value previous_score;
 };
 
 struct ThreadPool : public std::vector<Thread *>

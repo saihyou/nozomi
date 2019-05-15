@@ -37,11 +37,7 @@ Thread::Thread()
 {
   reset_calls_ = false;
   exit_        = false;
-  history_.clear();
-  counter_moves_.clear();
-  from_to_.clear();
-  counter_move_history_.clear();
-  capture_history_.fill(0);
+  Clear();
   index_  = Threads.size();
   std::unique_lock<std::mutex> lk(mutex_);
   searching_ = true;
@@ -57,6 +53,21 @@ Thread::~Thread()
   mutex_.unlock();
   native_thread_.join();
 }
+
+void Thread::Clear() {
+  counter_moves_.fill(kMoveNone);
+  main_history_.fill(0);
+  capture_history_.fill(0);
+
+  for (auto &to : continuation_history_)
+    for (auto &h : to) h->fill(0);
+
+  continuation_history_[kPieceNone][0]->fill(
+      Search::kCounterMovePruneThreshold - 1);
+  eval_hash_.Clear();
+  kpp_list_.Clear();
+}
+
 
 void
 Thread::wait_for_search_finished()

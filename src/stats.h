@@ -21,137 +21,81 @@
   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#ifndef _STATS_H_
-#define _STATS_H_
+#ifndef NOZOMI_STATS_H_
+#define NOZOMI_STATS_H_
 
 #include <array>
-#include <limits>
 #include <cstring>
-#include "types.h"
+#include <limits>
 #include "move.h"
+#include "types.h"
 
-constexpr int
-kCounterMoveThreshold = kValueZero;
+template <typename T, int D>
+class StatsEntry {
+  T entry;
 
-template<typename T, bool CM = false>
-struct Stats 
-{
-  static const int
-  kMax = 1 << 28;
+ public:
+  void operator=(const T &v) { entry = v; }
+  T *operator&() { return &entry; }
+  T *operator->() { return &entry; }
+  operator const T &() const { return entry; }
 
-  const T *
-  operator[](Piece pc) const
-  {
-    return table[pc];
-  }
+  void operator<<(int bonus) {
+    assert(abs(bonus) <= D);  // Ensure range is [-D, D]
+    static_assert(D <= std::numeric_limits<T>::max(), "D overflows T");
 
-  T *
-  operator[](Piece p)
-  {
-    return table[p]; 
-  }
-  
-  void 
-  clear()
-  { 
-    std::memset(table, 0, sizeof(table));
-  }
+    entry += bonus - entry * abs(bonus) / D;
 
-  void
-  fill(const int &v)
-  {
-    std::fill(&table[0][0], &table[kPieceMax - 1][kBoardSquare - 1] + 1, v);
-  }
-
-  void 
-  update(Piece p, Square to, Move m) 
-  {
-    table[p][to] = m;
-  }
-
-  void
-  update(Piece p, Square to, int v)
-  {
-    if (abs(v) >= 324)
-      return;
-
-    table[p][to] -= table[p][to] * abs(v) / (CM ? 936 : 324);
-    table[p][to] += v * 32;
-  }
-
-private:
-  T table[kPieceMax][kBoardSquare]; // kPieceMax = 31
-};
-
-typedef Stats<Move> MovesStats;
-typedef Stats<int, false> HistoryStats;
-typedef Stats<int, true> CounterMoveStats;
-typedef Stats<CounterMoveStats> CounterMoveHistoryStats;
-
-struct FromToStats
-{
-  int
-  get(Color c, Move m) const
-  {
-    return table[c][move_from(m)][move_to(m)];
-  }
-
-  void
-  clear()
-  {
-    std::memset(table, 0, sizeof(table));
-  }
-
-  void
-  update(Color c, Move m, int v)
-  {
-    if (abs(v) >= 324)
-      return;
-
-    Square f = move_from(m);
-    Square t = move_to(m);
-    assert(f < kNumberOfBoardHand);
-    table[c][f][t] -= table[c][f][t] * abs(v) / 324;
-    table[c][f][t] += v * 32;
-  }
-
-private:
-  int table[kNumberOfColor][kNumberOfBoardHand][kBoardSquare];
-};
-
-template<int kSize1, int kSize2, int kSize3, typename T = int16_t>
-struct StatCubes : public std::array<std::array<std::array<T, kSize3>, kSize2>, kSize1>
-{
-  void
-  fill(const T &v)
-  {
-    T *p = &(*this)[0][0][0];
-    std::fill(p, p + sizeof(*this) / sizeof(*p), v);
-  }
-
-  void
-  update(T &entry, int bonus, const int d, const int w)
-  {
-    if (abs(bonus) >= 324)
-      return;
-    assert(abs(w * d) < std::numeric_limits<T>().max());
-
-    entry += bonus * w - entry * abs(bonus) / d;
-
-    assert(abs(entry) <= w * d);
+    assert(abs(entry) <= D);
   }
 };
 
-typedef StatCubes<kPieceMax, kBoardSquare, kPieceTypeMax> CapturePieceToBoards;
+template <typename T, int D, int Size, int... Sizes>
+struct Stats : public std::array<Stats<T, D, Sizes...>, Size> {
+  typedef Stats<T, D, Size, Sizes...> stats;
 
-struct CapturePieceToHistory : public CapturePieceToBoards
-{
-  void
-  update(Piece pc, Square to, PieceType captured, int bonus)
-  {
-    StatCubes::update((*this)[pc][to][captured], bonus, 324, 2);
+  void fill(const T &v) {
+    // For standard-layout 'this' points to first struct member
+    assert(std::is_standard_layout<stats>::value);
+
+    typedef StatsEntry<T, D> entry;
+    entry *p = reinterpret_cast<entry *>(this);
+    std::fill(p, p + sizeof(*this) / sizeof(entry), v);
   }
-
 };
+
+template <typename T, int D, int Size>
+struct Stats<T, D, Size> : public std::array<StatsEntry<T, D>, Size> {};
+
+/// In stats table, D=0 means that the template parameter is not used
+enum StatsParams { kNotUsed = 0 };
+
+/// ButterflyHistory records how often quiet moves have been successful or
+/// unsuccessful during the current search, and is used for reduction and move
+/// ordering decisions. It uses 2 tables (one for each color) indexed by
+/// the move's from and to squares, see
+/// chessprogramming.wikispaces.com/Butterfly+Boards
+typedef Stats<int16_t, 10692, kNumberOfColor,
+              int(kSquareHand) * int(kBoardSquare)>
+    ButterflyHistory;
+
+/// CounterMoveHistory stores counter moves indexed by [piece][to] of the
+/// previous move, see chessprogramming.wikispaces.com/Countermove+Heuristic
+typedef Stats<Move, kNotUsed, kPieceMax, kBoardSquare> CounterMoveHistory;
+
+/// CapturePieceToHistory is addressed by a move's [piece][to][captured piece
+/// type]
+typedef Stats<int16_t, 10692, kPieceMax, kBoardSquare, kPieceTypeMax>
+    CapturePieceToHistory;
+
+/// PieceToHistory is like ButterflyHistory but is addressed by a move's
+/// [piece][to]
+typedef Stats<int16_t, 29952, kPieceMax, kBoardSquare> PieceToHistory;
+
+/// ContinuationHistory is the combined history of a given pair of moves,
+/// usually the current one given a previous one. The nested history table is
+/// based on PieceToHistory instead of ButterflyBoards.
+typedef Stats<PieceToHistory, kNotUsed, kPieceMax, kBoardSquare>
+    ContinuationHistory;
 
 #endif

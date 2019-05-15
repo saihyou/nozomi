@@ -26,57 +26,50 @@
 
 #include <algorithm>
 #include <cstring>
-
 #include "move_generator.h"
 #include "position.h"
 #include "search.h"
-#include "types.h"
 #include "stats.h"
+#include "types.h"
 
-class MovePicker 
-{
-public:
+class MovePicker {
+  enum PickType { kNext, kBest };
 
+ public:
   MovePicker(const MovePicker &) = delete;
   MovePicker &operator=(const MovePicker &) = delete;
-
   MovePicker(const Position &, Move, Value, const CapturePieceToHistory *);
-  MovePicker(const Position &, const CheckInfo *, Move, Depth, Square, const CapturePieceToHistory *);
-  MovePicker(const Position &, const CheckInfo *, Move, Depth, SearchStack *, const CapturePieceToHistory *);
+  MovePicker(const Position &, Move, Depth, const ButterflyHistory *,
+             const CapturePieceToHistory *, const PieceToHistory **, Square);
+  MovePicker(const Position &, const CheckInfo *, Move, Depth, const ButterflyHistory *,
+             const CapturePieceToHistory *, const PieceToHistory **, Move,
+             Move *);
+  Move NextMove(int *score = nullptr);
 
-  Move next_move(int *value = nullptr);
+ private:
+  template <PickType T, typename Pred>
+  Move Select(Pred);
+  template <GenType>
+  void Score();
+  ExtMove *begin() { return cur_; }
+  ExtMove *end() { return end_moves_; }
 
-private:
-  template<GenType> void score();
-
-  ExtMove *
-  begin()
-  {
-    return cur_;
-  }
-
-  ExtMove *
-  end()
-  {
-    return end_moves_;
-  }
-
-  const Position         &pos_;
-  const CheckInfo        *ci_;
-  const SearchStack      *ss_;
+  const Position &pos_;
+  const CheckInfo *ci_;
+  const ButterflyHistory *main_history_;
   const CapturePieceToHistory *capture_history_;
-  Move                    killers_[2];
-  Move                    countermove_;
-  Depth                   depth_;
-  Move                    tt_move_;
-  Square                  recapture_square_;
-  Value                   threshold_;
-  int                     max_value_ = 0;
-  int                     stage_;
-  ExtMove                *end_bad_captures_;
-  ExtMove                *cur_;
-  ExtMove                *end_moves_;
-  ExtMove                 moves_[kMaxMoves];
+  const PieceToHistory **continuation_history_;
+  Move tt_move_;
+  ExtMove refutations_[3], *cur_, *end_moves_, *end_bad_captures_;
+  int stage_;
+  Move move_;
+  int score_;
+  int max_score_;
+  Square recapture_square_;
+  Value threshold_;
+  Depth depth_;
+  ExtMove moves_[kMaxMoves];
 };
+
 
 #endif

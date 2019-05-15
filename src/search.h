@@ -39,23 +39,24 @@
 #endif
 #include "stats.h"
 
-struct SearchStack
-{
-  Move  *pv;
-  int    ply;
-  Move   current_move;
-  Move   excluded_move;
-  Move   killers[2];
-  Value  static_eval;
+struct SearchStack {
+  Move *pv;
+  PieceToHistory *continuation_history;
+  int ply;
+  Move current_move;
+  Move excluded_move;
+  Move killers[2];
+  Value static_eval;
   Eval::EvalParts eval_parts;
-  Value  material;
-  bool   evaluated;
-  int    move_count;
-  int    history;
-  CounterMoveStats *counter_moves;
+  Value material;
+  bool evaluated;
+  int stat_score;
+  int move_count;
 };
 namespace Search 
 {
+constexpr int kCounterMovePruneThreshold = 0;
+
 struct RootMove 
 {
   explicit RootMove(Move m) : pv(1, m) {}

@@ -53,13 +53,13 @@ on_threads(const Option &)
 void 
 on_hash_size(const Option &o) 
 { 
-  TT.resize(o); 
+  TT.Resize(o); 
 }
 
 void 
 on_clear_hash(const Option &) 
 { 
-  TT.clear(); 
+  TT.Clear(); 
 }
 
 bool 

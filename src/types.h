@@ -230,23 +230,30 @@ enum Rank
   kNumberOfRank
 };
 
-#define ENABLE_SAFE_OPERATORS_ON(T)                                         \
-inline T operator+(const T d1, const T d2) { return T(int(d1) + int(d2)); } \
-inline T operator+(T d1, int i) { return T(int(d1) + i); }                  \
-inline T operator-(const T d1, const T d2) { return T(int(d1) - int(d2)); } \
-inline T operator*(int i, const T d) { return T(i * int(d)); }              \
-inline T operator*(const T d, int i) { return T(int(d) * i); }              \
-inline T operator*(const T d1, const T d2) { return T(int(d1) * int(d2)); } \
-inline T operator-(const T d) { return T(-int(d)); }                        \
-inline T& operator+=(T& d1, const T d2) { return d1 = d1 + d2; }            \
-inline T& operator-=(T& d1, const T d2) { return d1 = d1 - d2; }            \
-inline T& operator*=(T& d, int i) { return d = T(int(d) * i); }
+#define ENABLE_SAFE_OPERATORS_ON(T)                                   \
+  constexpr T operator+(const T d1, const T d2) {                     \
+    return T(int(d1) + int(d2));                                      \
+  }                                                                   \
+  constexpr T operator+(T d1, int i) { return T(int(d1) + i); }       \
+  constexpr T operator-(const T d1, const T d2) {                     \
+    return T(int(d1) - int(d2));                                      \
+  }                                                                   \
+  constexpr T operator*(int i, const T d) { return T(i * int(d)); }   \
+  constexpr T operator*(const T d, int i) { return T(int(d) * i); }   \
+  constexpr T operator*(const T d1, const T d2) {                     \
+    return T(int(d1) * int(d2));                                      \
+  }                                                                   \
+  constexpr T operator-(const T d) { return T(-int(d)); }             \
+  constexpr T& operator+=(T& d1, const T d2) { return d1 = d1 + d2; } \
+  constexpr T& operator-=(T& d1, const T d2) { return d1 = d1 - d2; } \
+  constexpr T& operator*=(T& d, int i) { return d = T(int(d) * i); }
 
-#define ENABLE_OPERATORS_ON(T) ENABLE_SAFE_OPERATORS_ON(T)                  \
-inline T& operator++(T& d) { return d = T(int(d) + 1); }                    \
-inline T& operator--(T& d) { return d = T(int(d) - 1); }                    \
-inline T operator/(const T d, int i) { return T(int(d) / i); }              \
-inline T& operator/=(T& d, int i) { return d = T(int(d) / i); }
+#define ENABLE_OPERATORS_ON(T)                                      \
+  ENABLE_SAFE_OPERATORS_ON(T)                                       \
+  constexpr T& operator++(T& d) { return d = T(int(d) + 1); }       \
+  constexpr T& operator--(T& d) { return d = T(int(d) - 1); }       \
+  constexpr T operator/(const T d, int i) { return T(int(d) / i); } \
+  constexpr T& operator/=(T& d, int i) { return d = T(int(d) / i); }
 
 ENABLE_OPERATORS_ON(Value)
 ENABLE_OPERATORS_ON(PieceType)
@@ -257,73 +264,47 @@ ENABLE_OPERATORS_ON(Square)
 ENABLE_OPERATORS_ON(File)
 ENABLE_OPERATORS_ON(Rank)
 
-inline Value operator-(Value v, int i) { return Value(int(v) - i); }
-inline Value& operator+=(Value& v, int i) { return v = v + i; }
+constexpr Value operator-(Value v, int i) { return Value(int(v) - i); }
+constexpr Value& operator+=(Value& v, int i) { return v = v + i; }
 
 #undef ENABLE_OPERATORS_ON
 #undef ENABLE_SAFE_OPERATORS_ON
 
-inline Color
-operator~(Color c) 
-{
-  return Color(c ^ kWhite);
+constexpr Color operator~(Color c) { return Color(c ^ kWhite); }
+
+constexpr Value MateIn(int ply) { return kValueMate - ply; }
+
+constexpr Value MatedIn(int ply) { return -kValueMate + ply; }
+
+inline Piece MakePiece(PieceType pt, Color c) { return Piece((c << 4) | pt); }
+
+constexpr PieceType TypeOf(Piece p) { return PieceType(p & 0xF); }
+
+inline PieceType TypeOf(Square from) {
+  return PieceType(from - kBoardSquare + 1);
 }
 
-inline Value
-mate_in(int ply) 
-{
-  return kValueMate - ply;
-}
-
-inline Value
-mated_in(int ply) 
-{
-  return -kValueMate + ply;
-}
-
-inline Piece
-make_piece(PieceType pt, Color c) 
-{
-  return Piece((c << 4) | pt);
-}
-
-inline PieceType
-type_of(Piece p)  
-{
-  return PieceType(p & 0xF);
-}
-
-inline Color
-color_of(Piece p) 
-{
+constexpr Color ColorOf(Piece p) {
   assert(p != kEmpty);
   return Color(p >> 4);
 }
 
-inline PieceType
-to_drop_piece_type(Square from)
-{
-  return PieceType(from - kBoardSquare + 1);
+inline PieceType NormalType(PieceType p) { return PieceType(p & 0x7); }
+
+inline bool IsOk(Square s) { return s >= k9A && s <= k1I; }
+
+inline bool CanPromote(Color color, uint32_t to) {
+  if (color == kBlack)
+    return (to < k9D) ? true : false;
+  else
+    return (to > k1F) ? true : false;
 }
 
-inline PieceType
-unpromote_piece_type(PieceType p)
-{
-  return PieceType(p & 0x7);
-}
-
-inline bool
-is_ok(Square s) 
-{
-  return s >= k9A && s <= k1I;
-}
-
-inline int
-rank_distance(Square s1, Square s2)
-{
-  int r1 = s1 / 9;
-  int r2 = s2 / 9;
-  return (r1 > r2) ? r1 - r2 : r2 - r1;
+inline bool CanPromote(Color color, uint32_t from, uint32_t to) {
+  if (color == kBlack)
+    return (to < k9D || from < k9D) ? true : false;
+  else
+    return (to > k1F || from > k1F) ? true : false;
 }
 
 #endif

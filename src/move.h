@@ -106,6 +106,12 @@ move_to(Move m)
   return Square((m >> 0) & 0x007fU);
 }
 
+inline int FromTo(Move m) {
+  int from = m >> 7 & 0x7fU;
+  int to = m & 0x7fU;
+  return from * kBoardSquare + to;
+}
+
 inline PieceType 
 move_piece_type(Move m)
 {
@@ -119,7 +125,7 @@ move_piece(Move m, Color c)
   const PieceType type =
     (from >= kBoardSquare)
     ?
-    to_drop_piece_type(from)
+    TypeOf(from)
     :
     move_piece_type(m);
 

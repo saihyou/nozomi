@@ -22,16 +22,14 @@
 #include <array>
 #include <cstring>
 
-#include "types.h"
 #include "move.h"
+#include "types.h"
 
 class Position;
 struct SearchStack;
 
-namespace Eval
-{
-enum KPPIndex : int16_t
-{
+namespace Eval {
+enum KPPIndex : int16_t {
   kFHandPawn = 0,
   kEHandPawn = kFHandPawn + 19,
   kFHandLance = kEHandPawn + 19,
@@ -73,329 +71,251 @@ enum KPPIndex : int16_t
   kScoreEnd = kEKing + 81
 };
 
-inline KPPIndex
-operator+(KPPIndex d1, int i)
-{
+constexpr KPPIndex operator+(KPPIndex d1, int i) {
   return KPPIndex(int(d1) + i);
 }
 
-constexpr KPPIndex
-PieceToIndexBlackTable[kPieceMax] =
-{
-  kFENone,  // kEmpty
-  kFPawn,   // kBlackPawn
-  kFLance,  // kBlackLance
-  kFKnight, // kBlackKnight
-  kFSilver, // kBlackSilver
-  kFBishop, // kBlackBishop
-  kFRook,   // kBlackRook
-  kFGold,   // kBlackGold
-  kFKing,   // kBlackKing
-  kFGold,   // kBlackPromotedPawn
-  kFGold,   // kBlackPromotedLance
-  kFGold,   // kBlackPromotedKnight
-  kFGold,   // kBlackPromotedSilver
-  kFHorse,  // kBlackHorse
-  kFDragon, // kBlackDragon
-  kFENone,  // 15
-  kFENone,  // kFlagWhite
-  kEPawn,   // kWhitePawn
-  kELance,  // kWhiteLance
-  kEKnight, // kWhiteKnight
-  kESilver, // kWhiteSilver
-  kEBishop, // kWhiteBishop
-  kERook,   // kWhiteRook
-  kEGold,   // kWhiteGold
-  kEKing,  // kWhiteKing
-  kEGold,   // kWhitePromotedPawn
-  kEGold,   // kWhitePromotedLance
-  kEGold,   // kWhitePromotedKnight
-  kEGold,   // kWhitePromotedSilver
-  kEHorse,  // kWhiteHorse
-  kEDragon  // kWhiteDragon
+constexpr KPPIndex PieceToIndexBlackTable[kPieceMax] = {
+    kFENone,   // kEmpty
+    kFPawn,    // kBlackPawn
+    kFLance,   // kBlackLance
+    kFKnight,  // kBlackKnight
+    kFSilver,  // kBlackSilver
+    kFBishop,  // kBlackBishop
+    kFRook,    // kBlackRook
+    kFGold,    // kBlackGold
+    kFKing,    // kBlackKing
+    kFGold,    // kBlackPromotedPawn
+    kFGold,    // kBlackPromotedLance
+    kFGold,    // kBlackPromotedKnight
+    kFGold,    // kBlackPromotedSilver
+    kFHorse,   // kBlackHorse
+    kFDragon,  // kBlackDragon
+    kFENone,   // 15
+    kFENone,   // kFlagWhite
+    kEPawn,    // kWhitePawn
+    kELance,   // kWhiteLance
+    kEKnight,  // kWhiteKnight
+    kESilver,  // kWhiteSilver
+    kEBishop,  // kWhiteBishop
+    kERook,    // kWhiteRook
+    kEGold,    // kWhiteGold
+    kEKing,    // kWhiteKing
+    kEGold,    // kWhitePromotedPawn
+    kEGold,    // kWhitePromotedLance
+    kEGold,    // kWhitePromotedKnight
+    kEGold,    // kWhitePromotedSilver
+    kEHorse,   // kWhiteHorse
+    kEDragon   // kWhiteDragon
+};
+
+constexpr KPPIndex PieceToIndexWhiteTable[kPieceMax] = {
+    kFENone,   // kEmpty
+    kEPawn,    // kBlackPawn
+    kELance,   // kBlackLance
+    kEKnight,  // kBlackKnight
+    kESilver,  // kBlackSilver
+    kEBishop,  // kBlackBishop
+    kERook,    // kBlackRook
+    kEGold,    // kBlackGold
+    kFENone,   // kBlackKing
+    kEGold,    // kBlackPromotedPawn
+    kEGold,    // kBlackPromotedLance
+    kEGold,    // kBlackPromotedKnight
+    kEGold,    // kBlackPromotedSilver
+    kEHorse,   // kBlackHorse
+    kEDragon,  // kBlackDragon
+    kFENone,   // 15
+    kFENone,   // kFlagWhite
+    kFPawn,    // kWhitePawn
+    kFLance,   // kWhiteLance
+    kFKnight,  // kWhiteKnight
+    kFSilver,  // kWhiteSilver
+    kFBishop,  // kWhiteBishop
+    kFRook,    // kWhiteRook
+    kFGold,    // kWhiteGold
+    kFENone,   // kWhiteKing
+    kFGold,    // kWhitePromotedPawn
+    kFGold,    // kWhitePromotedLance
+    kFGold,    // kWhitePromotedKnight
+    kFGold,    // kWhitePromotedSilver
+    kFHorse,   // kWhiteHorse
+    kFDragon   // kWhiteDragon
 };
 
 constexpr KPPIndex
-PieceToIndexWhiteTable[kPieceMax] =
-{
-  kFENone,  // kEmpty
-  kEPawn,   // kBlackPawn
-  kELance,  // kBlackLance
-  kEKnight, // kBlackKnight
-  kESilver, // kBlackSilver
-  kEBishop, // kBlackBishop
-  kERook,   // kBlackRook
-  kEGold,   // kBlackGold
-  kFENone,  // kBlackKing
-  kEGold,   // kBlackPromotedPawn
-  kEGold,   // kBlackPromotedLance
-  kEGold,   // kBlackPromotedKnight
-  kEGold,   // kBlackPromotedSilver
-  kEHorse,  // kBlackHorse
-  kEDragon, // kBlackDragon
-  kFENone,  // 15
-  kFENone,  // kFlagWhite
-  kFPawn,   // kWhitePawn
-  kFLance,  // kWhiteLance
-  kFKnight, // kWhiteKnight
-  kFSilver, // kWhiteSilver
-  kFBishop, // kWhiteBishop
-  kFRook,   // kWhiteRook
-  kFGold,   // kWhiteGold
-  kFENone,  // kWhiteKing
-  kFGold,   // kWhitePromotedPawn
-  kFGold,   // kWhitePromotedLance
-  kFGold,   // kWhitePromotedKnight
-  kFGold,   // kWhitePromotedSilver
-  kFHorse,  // kWhiteHorse
-  kFDragon  // kWhiteDragon
-};
+    PieceTypeToBlackHandIndexTable[kNumberOfColor][kPieceTypeMax] = {
+        {kFEHandEnd, kFHandPawn, kFHandLance, kFHandKnight, kFHandSilver,
+         kFHandBishop, kFHandRook, kFHandGold, kFEHandEnd, kFHandPawn,
+         kFHandLance, kFHandKnight, kFHandSilver, kFHandBishop, kFHandRook},
+        {kFEHandEnd, kEHandPawn, kEHandLance, kEHandKnight, kEHandSilver,
+         kEHandBishop, kEHandRook, kEHandGold, kFEHandEnd, kEHandPawn,
+         kEHandLance, kEHandKnight, kEHandSilver, kEHandBishop, kEHandRook}};
 
 constexpr KPPIndex
-PieceTypeToBlackHandIndexTable[kNumberOfColor][kPieceTypeMax] =
-{
-  {
-    kFEHandEnd,
-    kFHandPawn,
-    kFHandLance,
-    kFHandKnight,
-    kFHandSilver,
-    kFHandBishop,
-    kFHandRook,
-    kFHandGold,
-    kFEHandEnd,
-    kFHandPawn,
-    kFHandLance,
-    kFHandKnight,
-    kFHandSilver,
-    kFHandBishop,
-    kFHandRook
-  },
-  {
-    kFEHandEnd,
-    kEHandPawn,
-    kEHandLance,
-    kEHandKnight,
-    kEHandSilver,
-    kEHandBishop,
-    kEHandRook,
-    kEHandGold,
-    kFEHandEnd,
-    kEHandPawn,
-    kEHandLance,
-    kEHandKnight,
-    kEHandSilver,
-    kEHandBishop,
-    kEHandRook
-  }
+    PieceTypeToWhiteHandIndexTable[kNumberOfColor][kPieceTypeMax] = {
+        {kFEHandEnd, kEHandPawn, kEHandLance, kEHandKnight, kEHandSilver,
+         kEHandBishop, kEHandRook, kEHandGold, kFEHandEnd, kEHandPawn,
+         kEHandLance, kEHandKnight, kEHandSilver, kEHandBishop, kEHandRook},
+        {kFEHandEnd, kFHandPawn, kFHandLance, kFHandKnight, kFHandSilver,
+         kFHandBishop, kFHandRook, kFHandGold, kFEHandEnd, kFHandPawn,
+         kFHandLance, kFHandKnight, kFHandSilver, kFHandBishop, kFHandRook}};
+
+constexpr int KPPHandIndex[8] = {
+    0,   // None
+    0,   // Pawn
+    2,   // Lance
+    4,   // Knight
+    6,   // Silver
+    10,  // Bishop
+    12,  // Rook
+    8    // Gold
 };
 
-constexpr KPPIndex
-PieceTypeToWhiteHandIndexTable[kNumberOfColor][kPieceTypeMax] =
-{
-  {
-    kFEHandEnd,
-    kEHandPawn,
-    kEHandLance,
-    kEHandKnight,
-    kEHandSilver,
-    kEHandBishop,
-    kEHandRook,
-    kEHandGold,
-    kFEHandEnd,
-    kEHandPawn,
-    kEHandLance,
-    kEHandKnight,
-    kEHandSilver,
-    kEHandBishop,
-    kEHandRook
-  },
-  {
-    kFEHandEnd,
-    kFHandPawn,
-    kFHandLance,
-    kFHandKnight,
-    kFHandSilver,
-    kFHandBishop,
-    kFHandRook,
-    kFHandGold,
-    kFEHandEnd,
-    kFHandPawn,
-    kFHandLance,
-    kFHandKnight,
-    kFHandSilver,
-    kFHandBishop,
-    kFHandRook
-  }
-};
-
-
-constexpr int 
-KPPHandIndex[8] =
-{
-  0,  // None
-  0,  // Pawn
-  2,  // Lance
-  4,  // Knight
-  6,  // Silver
-  10, // Bishop
-  12, // Rook
-  8   //Gold
-};
-
-enum PieceValue
-{
-  kPawnValue      = 88,
-  kLanceValue     = 238,
-  kKnightValue    = 259,
-  kSilverValue    = 370,
-  kGoldValue      = 448,
+enum PieceValue {
+  kPawnValue = 88,
+  kLanceValue = 238,
+  kKnightValue = 259,
+  kSilverValue = 370,
+  kGoldValue = 448,
   kProSilverValue = 488,
-  kProLanceValue  = 493,
+  kProLanceValue = 493,
   kProKnightValue = 518,
-  kProPawnValue   = 551,
-  kBishopValue    = 565,
-  kRookValue      = 637,
-  kHorseValue     = 831,
-  kDragonValue    = 954,
-  kKingValue      = 15000
+  kProPawnValue = 551,
+  kBishopValue = 565,
+  kRookValue = 637,
+  kHorseValue = 831,
+  kDragonValue = 954,
+  kKingValue = 15000
 };
 
-constexpr int
-PieceValueTable[kPieceTypeMax] =
-{
-  0,
-  kPawnValue,
-  kLanceValue,
-  kKnightValue,
-  kSilverValue,
-  kBishopValue,
-  kRookValue,
-  kGoldValue,
-  kKingValue,
-  kProPawnValue,
-  kProLanceValue,
-  kProKnightValue,
-  kProSilverValue,
-  kHorseValue,
-  kDragonValue
-};
+constexpr int PieceValueTable[kPieceTypeMax] = {0,
+                                                kPawnValue,
+                                                kLanceValue,
+                                                kKnightValue,
+                                                kSilverValue,
+                                                kBishopValue,
+                                                kRookValue,
+                                                kGoldValue,
+                                                kKingValue,
+                                                kProPawnValue,
+                                                kProLanceValue,
+                                                kProKnightValue,
+                                                kProSilverValue,
+                                                kHorseValue,
+                                                kDragonValue};
 
-constexpr int
-PromotePieceValueTable[7] =
-{
-  0,
-  PieceValueTable[kPromotedPawn]   - PieceValueTable[kPawn],
-  PieceValueTable[kPromotedLance]  - PieceValueTable[kLance],
-  PieceValueTable[kPromotedKnight] - PieceValueTable[kKnight],
-  PieceValueTable[kPromotedSilver] - PieceValueTable[kSilver],
-  PieceValueTable[kHorse]          - PieceValueTable[kBishop],
-  PieceValueTable[kDragon]         - PieceValueTable[kRook]
-};
+constexpr int PromotePieceValueTable[7] = {
+    0,
+    PieceValueTable[kPromotedPawn] - PieceValueTable[kPawn],
+    PieceValueTable[kPromotedLance] - PieceValueTable[kLance],
+    PieceValueTable[kPromotedKnight] - PieceValueTable[kKnight],
+    PieceValueTable[kPromotedSilver] - PieceValueTable[kSilver],
+    PieceValueTable[kHorse] - PieceValueTable[kBishop],
+    PieceValueTable[kDragon] - PieceValueTable[kRook]};
 
-constexpr int
-ExchangePieceValueTable[kPieceTypeMax] =
-{
-  0,
-  PieceValueTable[kPawn] * 2,
-  PieceValueTable[kLance] * 2,
-  PieceValueTable[kKnight] * 2,
-  PieceValueTable[kSilver] * 2,
-  PieceValueTable[kBishop] * 2,
-  PieceValueTable[kRook] * 2,
-  PieceValueTable[kGold] * 2,
-  0,
-  PieceValueTable[kPromotedPawn] + PieceValueTable[kPawn],
-  PieceValueTable[kPromotedLance] + PieceValueTable[kLance],
-  PieceValueTable[kPromotedKnight] + PieceValueTable[kKnight],
-  PieceValueTable[kPromotedSilver] + PieceValueTable[kSilver],
-  PieceValueTable[kHorse] + PieceValueTable[kBishop],
-  PieceValueTable[kDragon] + PieceValueTable[kRook]
-};
+constexpr int ExchangePieceValueTable[kPieceTypeMax] = {
+    0,
+    PieceValueTable[kPawn] * 2,
+    PieceValueTable[kLance] * 2,
+    PieceValueTable[kKnight] * 2,
+    PieceValueTable[kSilver] * 2,
+    PieceValueTable[kBishop] * 2,
+    PieceValueTable[kRook] * 2,
+    PieceValueTable[kGold] * 2,
+    0,
+    PieceValueTable[kPromotedPawn] + PieceValueTable[kPawn],
+    PieceValueTable[kPromotedLance] + PieceValueTable[kLance],
+    PieceValueTable[kPromotedKnight] + PieceValueTable[kKnight],
+    PieceValueTable[kPromotedSilver] + PieceValueTable[kSilver],
+    PieceValueTable[kHorse] + PieceValueTable[kBishop],
+    PieceValueTable[kDragon] + PieceValueTable[kRook]};
 
 constexpr int kTableSize = 131072;
+constexpr int kListNum = 38;
+constexpr int kFvScale = 32;
 
-struct EvalParts
-{
-  Value black_kpp;
-  Value white_kpp;
+struct ValueUnit {
+  Value us;
+  Value them;
+
+  ValueUnit &operator+=(const ValueUnit &a) {
+    this->us += a.us;
+    this->them += a.them;
+    return *this;
+  }
+
+  ValueUnit &operator-=(const ValueUnit &a) {
+    this->us -= a.us;
+    this->them -= a.them;
+    return *this;
+  }
+
+  ValueUnit operator+(const ValueUnit &a) const {
+    ValueUnit v;
+    v.us = this->us + a.us;
+    v.them = this->them + a.them;
+    return v;
+  }
+
+  ValueUnit operator-(const ValueUnit &a) const {
+    ValueUnit v;
+    v.us = this->us - a.us;
+    v.them = this->them - a.them;
+    return v;
+  }
+};
+
+struct EvalParts {
+  ValueUnit kppt[kNumberOfColor];
   Value kkpt;
 };
 
-struct Entry
-{
-  Key       key;
+struct Entry {
   EvalParts parts;
+  Key key;
 };
 
-struct HashTable
-{
-  Entry *
-  operator[](Key key)
-  {
+struct HashTable {
+  Entry *operator[](Key key) {
     return &table[(uint32_t)key & (kTableSize - 1)];
   }
-
-private:
+  void Clear() { table.fill({}); }
+ private:
   std::array<Entry, kTableSize> table;
 };
 
-constexpr int
-kListNum = 38;
-
-constexpr int
-kFvScale = 32;
-
-class KingCacheTable
-{
-public:
-  void
-  set_list(Color c, Square k, KPPIndex *list)
-  {
+class KppListTable {
+ public:
+  void SetList(Color c, Square k, KPPIndex *list) {
     std::memcpy(table_[c][k], list, sizeof(KPPIndex) * kListNum);
   }
 
-  void
-  set_value(Color c, Square k, Value v)
-  {
-    value_[c][k] = v;
-  }
+  void SetValue(Color c, Square k, ValueUnit v) { value_[c][k] = v; }
 
-  const KPPIndex *
-  get_list(Color c, Square k) const
-  {
-    return table_[c][k];
-  }
+  const KPPIndex *GetList(Color c, Square k) const { return table_[c][k]; }
 
-  Value
-  get_value(Color c, Square k) const
-  {
-    return value_[c][k];
-  }
+  ValueUnit GetValue(Color c, Square k) const { return value_[c][k]; }
+  void Clear() { std::memset(this, 0, sizeof(KppListTable)); }
 
-private:
+ private:
   KPPIndex table_[kNumberOfColor][kBoardSquare][kListNum];
-  Value    value_[kNumberOfColor][kBoardSquare] = {{kValueZero}};
+  ValueUnit value_[kNumberOfColor][kBoardSquare] = {};
 };
 
-inline Square
-inverse(Square sq)
-{
+inline Square inverse(Square sq) {
   return static_cast<Square>(kBoardSquare - 1 - sq);
 }
 
-bool
-init();
+bool init();
 
-Value 
-evaluate(const Position &pos, SearchStack *ss);
+Value evaluate(const Position &pos, SearchStack *ss);
 
-Value
-calc_kkpt_value(const Position &pos);
+Value CalcKkptValue(const Position &pos);
 
-extern int16_t KPP[kBoardSquare][kFEEnd][kFEEnd];
+extern int16_t KPPT[kBoardSquare][kFEEnd][kFEEnd][kNumberOfColor];
 extern int16_t KKPT[kBoardSquare][kBoardSquare][kFEEnd][kNumberOfColor];
 
-} // namespace Eval
+}  // namespace Eval
 
 #endif

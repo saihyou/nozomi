@@ -38,12 +38,12 @@ struct PositionData
 
 struct Gradient
 {
-  std::atomic<LearnFloatingPoint> kpp[kBoardSquare][Eval::kFEEnd][Eval::kFEEnd];
+  std::atomic<LearnFloatingPoint> kppt[kBoardSquare][Eval::kFEEnd][Eval::kFEEnd][kNumberOfColor];
   std::atomic<LearnFloatingPoint> kkpt[kBoardSquare][kBoardSquare][Eval::kFEEnd][kNumberOfColor];
-  std::atomic<int> kpp_count[kBoardSquare][Eval::kFEEnd][Eval::kFEEnd];
+  std::atomic<int> kppt_count[kBoardSquare][Eval::kFEEnd][Eval::kFEEnd][kNumberOfColor];
   std::atomic<int> kkpt_count[kBoardSquare][kBoardSquare][Eval::kFEEnd][kNumberOfColor];
 
-  void increment(const Position &pos, LearnFloatingPoint delta);
+  void increment(const Position &pos, LearnFloatingPoint delta, bool kpp);
   void clear();
 };
 
@@ -60,6 +60,7 @@ private:
   void   add_param(const Gradient &param1);
   void   load_param();
   void   save_param();
+  bool kpp_;
   int                                    batch_size_;
   std::vector<std::string>               game_list_;
   std::vector<Position>                  positions_;

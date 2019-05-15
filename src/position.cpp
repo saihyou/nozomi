@@ -250,12 +250,12 @@ Position::set(const std::string &sfen, Thread *t)
     else
     {
       Piece p = piece_letters[token];
-      PieceType t = type_of(p);
-      Color c = color_of(p);
+      PieceType type = TypeOf(p);
+      Color c = ColorOf(p);
       for (int i = 0; i < piece_num; i++)
       {
-        add_hand(hand_[c], t);
-        state_->hand_key += Zobrist::hands[c][t];
+        add_hand(hand_[c], type);
+        state_->hand_key += Zobrist::hands[c][type];
       }
       piece_num = 1;
     }
@@ -270,7 +270,7 @@ Position::set(const std::string &sfen, Thread *t)
   if (state_->checkers_bb.test())
     state_->continuous_checks[~side_to_move_] = 1; 
 
-  int list_index = 0;
+  uint8_t list_index = 0;
   for (int i = 1; i <= number_of(hand_[kBlack], kPawn); ++i)
   {
     state_->black_kpp_list[list_index]         = kFHandPawn + i;
@@ -419,7 +419,7 @@ Position::clear()
     hand_[color] = kHandZero;
     square_king_[color] = k9A;
   }
-  memset(squares_, kEmpty, kBoardSquare);
+  memset(squares_, kEmpty, sizeof(squares_));
   side_to_move_ = kBlack;
   state_ = &start_state_;
   nodes_searched_ = 0;
@@ -454,10 +454,10 @@ Position::do_move(Move m, StateInfo &new_state, bool gives_check)
 
   if (from >= kBoardSquare)
   {
-    const PieceType drop = to_drop_piece_type(from);
+    const PieceType drop = TypeOf(from);
     assert(drop != kOccupied);
     piece_board_[us][drop].xor_bit(to);
-    squares_[to] = make_piece(drop, us);
+    squares_[to] = MakePiece(drop, us);
     piece_board_[us][kOccupied].xor_bit(to);
     sub_hand(hand_[us], drop);
     hand_key -= Zobrist::hands[us][drop];
@@ -465,7 +465,7 @@ Position::do_move(Move m, StateInfo &new_state, bool gives_check)
 
     assert(to < kBoardSquare);
     int hand_num   = number_of(hand_[us], drop) + 1;
-    int list_index = kpp_list_index_[PieceTypeToSquareHandTable[us][drop] + hand_num];
+    uint8_t list_index = kpp_list_index_[PieceTypeToSquareHandTable[us][drop] + hand_num];
     assert(list_index < 38);
     state_->black_kpp_list[list_index] = PieceToIndexBlackTable[squares_[to]] + to;
     state_->white_kpp_list[list_index] = PieceToIndexWhiteTable[squares_[to]] + inverse(to);
@@ -483,7 +483,7 @@ Position::do_move(Move m, StateInfo &new_state, bool gives_check)
     {
       piece_board_[us][piece_move].xor_bit(from);
       piece_board_[us][piece_move + kFlagPromoted].xor_bit(to);
-      squares_[to] = make_piece(piece_move + kFlagPromoted, us);
+      squares_[to] = MakePiece(piece_move + kFlagPromoted, us);
       board_key -= Zobrist::tables[us][piece_move][from];
       board_key += Zobrist::tables[us][piece_move + kFlagPromoted][to];
       state_->material += 
@@ -496,7 +496,7 @@ Position::do_move(Move m, StateInfo &new_state, bool gives_check)
     else
     {
       piece_board_[us][piece_move] ^= set_clear;
-      squares_[to] = make_piece(piece_move, us);
+      squares_[to] = MakePiece(piece_move, us);
       board_key -= Zobrist::tables[us][piece_move][from];
       board_key += Zobrist::tables[us][piece_move][to];
       if (piece_move == kKing)
@@ -511,7 +511,7 @@ Position::do_move(Move m, StateInfo &new_state, bool gives_check)
       add_hand(hand_[us], piece_capture);
       piece_board_[enemy][kOccupied].xor_bit(to);
       board_key -= Zobrist::tables[enemy][piece_capture][to];
-      hand_key += Zobrist::hands[us][piece_capture & 0x7];
+      hand_key += Zobrist::hands[us][NormalType(piece_capture)];
       state_->material +=
         (us == kBlack)
         ?
@@ -519,7 +519,7 @@ Position::do_move(Move m, StateInfo &new_state, bool gives_check)
         :
         -ExchangePieceValueTable[piece_capture];
 
-      int captured_index = kpp_list_index_[to];
+      uint8_t captured_index = kpp_list_index_[to];
       int hand_num       = number_of(hand_[us], piece_capture);
       state_->black_kpp_list[captured_index] = PieceTypeToBlackHandIndexTable[us][piece_capture] + hand_num;
       state_->white_kpp_list[captured_index] = PieceTypeToWhiteHandIndexTable[us][piece_capture] + hand_num;
@@ -529,7 +529,7 @@ Position::do_move(Move m, StateInfo &new_state, bool gives_check)
 
     if (piece_move != kKing)
     {
-      int kpp_index = kpp_list_index_[from];
+      uint8_t kpp_index = kpp_list_index_[from];
       assert(kpp_index < 38);
       kpp_list_index_[to] = kpp_index;
       state_->black_kpp_list[kpp_index] = PieceToIndexBlackTable[squares_[to]] + to;
@@ -563,7 +563,7 @@ Position::do_null_move(StateInfo &new_state)
   state_ = &new_state;
 
   state_->board_key ^= Zobrist::side;
-  prefetch(TT.first_entry(key()));
+  prefetch(TT.FirstEntry(key()));
 
   side_to_move_ = ~side_to_move_;
 }
@@ -585,7 +585,7 @@ Position::undo_move(Move move)
   Square to = move_to(move);
   if (from >= kBoardSquare)
   {
-    PieceType drop = to_drop_piece_type(from);
+    PieceType drop = TypeOf(from);
     assert(drop != kOccupied);
     piece_board_[side_to_move_][drop].xor_bit(to);
     add_hand(hand_[side_to_move_], drop);
@@ -603,12 +603,12 @@ Position::undo_move(Move move)
     {
       piece_board_[side_to_move_][piece_move].xor_bit(from);
       piece_board_[side_to_move_][piece_move + kFlagPromoted].xor_bit(to);
-      squares_[from] = make_piece(piece_move, side_to_move_);
+      squares_[from] = MakePiece(piece_move, side_to_move_);
     }
     else
     {
       piece_board_[side_to_move_][piece_move] ^= set_clear;
-      squares_[from] = make_piece(piece_move, side_to_move_);
+      squares_[from] = MakePiece(piece_move, side_to_move_);
       if (piece_move == kKing)
         square_king_[side_to_move_] = static_cast<Square>(from);
     }
@@ -622,7 +622,7 @@ Position::undo_move(Move move)
       Color enemy = ~side_to_move_;
       piece_board_[enemy][piece_capture].xor_bit(to);
       sub_hand(hand_[side_to_move_], piece_capture);
-      squares_[to] = make_piece(piece_capture, enemy);
+      squares_[to] = MakePiece(piece_capture, enemy);
       piece_board_[enemy][kOccupied].xor_bit(to);
       kpp_list_index_[to] = state_->list_index_capture;
     }
@@ -635,40 +635,25 @@ Position::undo_move(Move move)
   state_ = state_->previous;
 }
 
-bool 
-Position::gives_check(Move m, const CheckInfo &ci) const
-{
+bool Position::gives_check(Move m, const CheckInfo &ci) const {
   PieceType type = move_piece_type(m);
   Square to = move_to(m);
   Color enemy = ~side_to_move_;
-  BitBoard bb = MaskTable[to];
   Square from = move_from(m);
 
-  if (from >= kBoardSquare)
-  {
-    type = to_drop_piece_type(from);
-    bb &= ci.check_squares[type];
-    return bb.test();
-  }
-  else
-  {
-    if (move_is_promote(m))
-      type = type + kFlagPromoted;
-    bb &= ci.check_squares[type];
+  if (from >= kBoardSquare) {
+    type = TypeOf(from);
+    return (MaskTable[to] & ci.check_squares[type]);
+  } else {
+    if (move_is_promote(m)) type = type + kFlagPromoted;
 
     // 直接の王手
-    if (bb.test())
-      return true;
+    if (MaskTable[to] & ci.check_squares[type]) return true;
 
     // 駒が動くことによって王手がかかる場合
-    if
-    (
-      ci.discover_check_candidates.test()
-      &&
-      (ci.discover_check_candidates & MaskTable[from]).test()
-      &&
-      !aligned(from, to, square_king_[enemy]) 
-    )
+    if (ci.discover_check_candidates &&
+        (ci.discover_check_candidates & MaskTable[from]) &&
+        !aligned(from, to, square_king_[enemy]))
       return true;
   }
   return false;
@@ -745,174 +730,126 @@ Position::check_blockers(Color c, Color king_color, const BitBoard &occupied) co
   {
     Square sq = pinners.pop_bit();
     const BitBoard b = BetweenTable[king_square][sq] & occupied;
-    if (_mm_popcnt_u64(b.to_uint64()) == 1)
+    if (_mm_popcnt_u64(b.ToUint64()) == 1)
       result |= b & piece_board_[c][kOccupied];
   }
   return result;
 }
 
-bool
-Position::pseudo_legal(Move m) const
-{
+bool Position::pseudo_legal(Move m) const {
   Square from = move_from(m);
   Square to = move_to(m);
 
-  if (m == kMoveNone)
-    return false;
+  if (m == kMoveNone) return false;
 
-  if (from >= kBoardSquare)
-  {
+  if (from >= kBoardSquare) {
     // drop先がemptyではない場合は打てないので違法手
-    if (squares_[to] != kEmpty)
-      return false;
+    if (squares_[to] != kEmpty) return false;
 
-    PieceType drop = to_drop_piece_type(from);
-    if (!has_hand(hand_[side_to_move_], drop))
-      return false;
+    PieceType drop = TypeOf(from);
+    if (!has_hand(hand_[side_to_move_], drop)) return false;
 
-    if (drop == kPawn)
-    {
-      if (gives_mate_by_drop_pawn(to))
-        return false;
+    if (drop == kPawn) {
+      if (gives_mate_by_drop_pawn(to)) return false;
 
-      if (is_pawn_exist(to, side_to_move_))
-        return false;
+      if (is_pawn_exist(to, side_to_move_)) return false;
     }
 
-    if (in_check())
-    {
+    if (in_check()) {
       BitBoard target = state_->checkers_bb;
       Square sq = target.pop_bit();
       // 両王手の場合
-      if (target.test())
-        return false;
+      if (target.test()) return false;
       target = BetweenTable[sq][square_king_[side_to_move_]];
-      if (!target.contract(MaskTable[to]))
-        return false;
+      if (!target.contract(MaskTable[to])) return false;
     }
-  }
-  else
-  {
+  } else {
     PieceType type = move_piece_type(m);
-    Piece piece = make_piece(type, side_to_move_);
+    Piece piece = MakePiece(type, side_to_move_);
 
-    if (type == kPieceNone || squares_[from] != piece)
-      return false;
+    if (type == kPieceNone || squares_[from] != piece) return false;
 
-    if (side_to_move_ == kBlack)
-    {
-      if (squares_[to] != kEmpty && squares_[to] < kFlagWhite)
-        return false;
-    }
-    else
-    {
-      if (squares_[to] != kEmpty && squares_[to] > kFlagWhite)
-        return false;
+    if (side_to_move_ == kBlack) {
+      if (squares_[to] != kEmpty && squares_[to] < kFlagWhite) return false;
+    } else {
+      if (squares_[to] != kEmpty && squares_[to] > kFlagWhite) return false;
     }
 
     PieceType capture = move_capture(m);
-    if (capture == kPieceNone)
-    {
-      if (squares_[to] != kEmpty)
-        return false;
-    }
-    else
-    {
-      if (capture == kKing)
-        return false;
+    if (capture == kPieceNone) {
+      if (squares_[to] != kEmpty) return false;
+    } else {
+      if (capture == kKing) return false;
 
-      if (make_piece(capture, ~side_to_move_) != squares_[to])
-        return false;
+      if (MakePiece(capture, ~side_to_move_) != squares_[to]) return false;
     }
 
-    if (move_is_promote(m))
-    {
-      if (!can_promote(side_to_move_, from, to))
-        return false;
+    if (move_is_promote(m)) {
+      if (!can_promote(side_to_move_, from, to)) return false;
     }
 
-    BitBoard bb;
-    switch (type)
-    {
-    case kPawn:
-      bb = PawnAttacksTable[side_to_move_][from] & MaskTable[to];
-      if (!bb.test())
-        return false;
-      break;
-    case kLance:
-      bb = lance_attack(occupied(), side_to_move_, from) & MaskTable[to];
-      if (!bb.test())
-        return false;
-      break;
-    case kKnight:
-      bb = KnightAttacksTable[side_to_move_][from] & MaskTable[to];
-      if (!bb.test())
-        return false;
-      break;
-    case kSilver:
-      bb = SilverAttacksTable[side_to_move_][from] & MaskTable[to];
-      if (!bb.test())
-        return false;
-      break;
-    case kGold:
-    case kPromotedPawn:
-    case kPromotedLance:
-    case kPromotedKnight:
-    case kPromotedSilver:
-      bb = GoldAttacksTable[side_to_move_][from] & MaskTable[to];
-      if (!bb.test())
-        return false;
-      break;
-    case kRook:
-      bb = rook_attack(occupied(), from) & MaskTable[to];
-      if (!bb.test())
-        return false;
-      break;
-    case kDragon:
-      bb = (rook_attack(occupied(), from) | KingAttacksTable[from]) & MaskTable[to];
-      if (!bb.test())
-        return false;
-      break;
-    case kBishop:
-      bb = bishop_attack(occupied(), from) & MaskTable[to];
-      if (!bb.test())
-        return false;
-      break;
-    case kHorse:
-      bb = (bishop_attack(occupied(), from) | KingAttacksTable[from]) & MaskTable[to];
-      if (!bb.test())
-        return false;
-      break;
-    case kKing:
-      bb = KingAttacksTable[from] & MaskTable[to];
-      if (!bb.test())
-        return false;
-      break;
-    default:
-      break;
+    switch (type) {
+      case kPawn:
+        if (!(PawnAttacksTable[side_to_move_][from] & MaskTable[to]))
+          return false;
+        break;
+      case kLance:
+        if (!(lance_attack(occupied(), side_to_move_, from) & MaskTable[to]))
+          return false;
+        break;
+      case kKnight:
+        if (!(KnightAttacksTable[side_to_move_][from] & MaskTable[to]))
+          return false;
+        break;
+      case kSilver:
+        if (!(SilverAttacksTable[side_to_move_][from] & MaskTable[to]))
+          return false;
+        break;
+      case kGold:
+      case kPromotedPawn:
+      case kPromotedLance:
+      case kPromotedKnight:
+      case kPromotedSilver:
+        if (!(GoldAttacksTable[side_to_move_][from] & MaskTable[to]))
+          return false;
+        break;
+      case kRook:
+        if (!(rook_attack(occupied(), from) & MaskTable[to])) return false;
+        break;
+      case kDragon:
+        if (!((rook_attack(occupied(), from) | KingAttacksTable[from]) &
+              MaskTable[to]))
+          return false;
+        break;
+      case kBishop:
+        if (!(bishop_attack(occupied(), from) & MaskTable[to])) return false;
+        break;
+      case kHorse:
+        if (!((bishop_attack(occupied(), from) | KingAttacksTable[from]) &
+              MaskTable[to]))
+          return false;
+        break;
+      case kKing:
+        if (!(KingAttacksTable[from] & MaskTable[to])) return false;
+        break;
+      default:
+        break;
     }
 
-
-    if (in_check())
-    {
-      if (type == kKing)
-      {
+    if (in_check()) {
+      if (type == kKing) {
         BitBoard oc = occupied_;
         oc.xor_bit(from);
-        if (is_attacked(to, side_to_move_, oc))
-          return false;
-      }
-      else
-      {
+        if (is_attacked(to, side_to_move_, oc)) return false;
+      } else {
         BitBoard target = state_->checkers_bb;
         Square sq = target.pop_bit();
         // 両王手
-        if (target.test())
-          return false;
-        
-        target = BetweenTable[sq][square_king_[side_to_move_]] | state_->checkers_bb;
-        if (!target.contract(MaskTable[to]))
-          return false;
+        if (target.test()) return false;
+
+        target =
+            BetweenTable[sq][square_king_[side_to_move_]] | state_->checkers_bb;
+        if (!target.contract(MaskTable[to])) return false;
       }
     }
   }
@@ -988,8 +925,8 @@ Position::put_piece(Piece piece, Square sq)
   squares_[sq] = piece;
   piece_board_[color][kOccupied].xor_bit(sq);
   occupied_.xor_bit(sq);
-  piece_board_[color][piece & 0xF].xor_bit(sq);
-  state_->board_key += Zobrist::tables[color][piece & 0xf][sq];
+  piece_board_[color][TypeOf(piece)].xor_bit(sq);
+  state_->board_key += Zobrist::tables[color][TypeOf(piece)][sq];
   if (piece == kBlackKing)
     square_king_[kBlack] = sq;
 
@@ -1156,7 +1093,7 @@ Position::see_ge(Move m, Value v, Color c) const
   }
   else
   {
-    next_victim = to_drop_piece_type(from);
+    next_victim = TypeOf(from);
     balance = kValueZero;
     if (balance < v)
       return false;
@@ -1215,7 +1152,7 @@ Position::key_after(Move m) const
 
   if (from >= kBoardSquare)
   {
-    PieceType drop = to_drop_piece_type(from);
+    PieceType drop = TypeOf(from);
     hand_key -= Zobrist::hands[us][drop];
     board_key += Zobrist::tables[us][drop][to];
   }
@@ -1239,7 +1176,7 @@ Position::key_after(Move m) const
     {
       Color enemy = ~us;
       board_key -= Zobrist::tables[enemy][piece_capture][to];
-      hand_key += Zobrist::hands[us][piece_capture & 0x7];
+      hand_key += Zobrist::hands[us][NormalType(piece_capture)];
     }
   }
 

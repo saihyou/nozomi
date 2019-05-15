@@ -297,7 +297,7 @@ Position::pieces(PieceType type, Color color) const
 inline PieceType
 Position::piece_type(Square sq) const
 {
-  return static_cast<PieceType>(squares_[sq] & 0xF);
+  return TypeOf(squares_[sq]);
 }
 
 inline Square

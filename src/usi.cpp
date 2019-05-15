@@ -310,7 +310,7 @@ USI::format_move(Move m)
 
   if (from >= kBoardSquare)
   {
-    PieceType piece = to_drop_piece_type(from);
+    PieceType piece = TypeOf(from);
     string drop(1, kPieceToChar[piece]);
     drop += "*" + SquareToStringTable[to];
     return drop;
@@ -388,7 +388,7 @@ USI::to_sfen(const Position &pos)
       {
         if (num > 1)
           h += std::to_string(num);
-        Piece p = make_piece(pt, c);
+        Piece p = MakePiece(pt, c);
         h += PieceStringTable[p];
       }
     }

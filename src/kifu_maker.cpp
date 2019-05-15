@@ -118,11 +118,12 @@ bool
 search(Position &pos, size_t multi_pv, Depth search_depth)
 {
   Thread *thread = pos.this_thread();
-  SearchStack stack[kMaxPly + 7];
-  SearchStack *ss = stack + 4;
-  std::memset(ss - 4, 0, 8 * sizeof(SearchStack));
-  for (int i = 4; i > 0; --i)
-    (ss - i)->counter_moves = &thread->counter_move_history_[kEmpty][0];
+  SearchStack stack[kMaxPly + 10];
+  SearchStack *ss = stack + 7;
+  std::memset(ss - 7, 0, 10 * sizeof(SearchStack));
+  for (int i = 7; i > 0; --i)
+    (ss - i)->continuation_history =
+        &thread->continuation_history_[kPieceNone][0];  // Use as sentinel
 
   thread->root_moves_.clear();
   for (auto &m : MoveList<kLegalForSearch>(pos))
@@ -130,8 +131,8 @@ search(Position &pos, size_t multi_pv, Depth search_depth)
   if (thread->root_moves_.empty())
     return false;
 
-  Search::DrawValue[pos.side_to_move()] = -kValueDraw;
-  Search::DrawValue[~pos.side_to_move()] = kValueDraw;
+  Search::DrawValue[pos.side_to_move()] = -kValueMate;
+  Search::DrawValue[~pos.side_to_move()] = kValueMate;
   Value v;
   for (thread->root_depth_ = kDepthZero + 1; thread->root_depth_ <= search_depth; ++thread->root_depth_)
   {
@@ -292,13 +293,21 @@ play_game(std::vector<PositionData> &position_list, std::vector<std::vector<std:
   Color win = kNoColor;
   while (true)
   {
-    TT.new_search();
-    if (!search(pos, 1, kSearchDepth))
-    {
+    TT.NewSearch();
+    if (!search(pos, 1, kSearchDepth)) {
       win = ~pos.side_to_move();
       break;
     }
     Value v = thread->root_moves_[0].score;
+
+    if (v < -kWinValue || v > kWinValue)
+    {
+      if (v < -kWinValue)
+        win = ~pos.side_to_move();
+      else
+        win = pos.side_to_move();
+      break;
+    }
 
     if (pos.game_ply() > 1000)
     {

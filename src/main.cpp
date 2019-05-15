@@ -48,7 +48,7 @@ main(int argc, char* argv[])
   Threads.init();
   MoveScore::init();
 
-  TT.resize(Options["USI_Hash"]);
+  TT.Resize(Options["USI_Hash"]);
 
 #ifdef APERY_BOOK
   AperyBook::init();
@@ -69,12 +69,7 @@ main(int argc, char* argv[])
     cmd += std::string(argv[i]) + " ";
   std::istringstream is(cmd);
 
-  if (type == "bonanza")
-  {
-    std::unique_ptr<Learner> learner(new Learner);
-    learner->learn(is);
-  }
-  else if (type == "reinforce")
+  if (type == "reinforce")
   {
     std::unique_ptr<Reinforcer> reinforcer(new Reinforcer);
     reinforcer->reinforce(is);
