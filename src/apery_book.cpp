@@ -174,16 +174,16 @@ AperyBook::probe(const Position &pos, const std::string &fname, bool pick_best)
       int from_raw = (entry.from_to_pro >> 7) & 0x007fU;
       if (from_raw >= kBoardSquare) 
       {
-        move = move_init(to, to_drop_piece_type(static_cast<Square>(from_raw)));
+        move = move_init(to, TypeOf(static_cast<Square>(from_raw)));
       }
       else
       {
         Square from = to_square(from_raw);
-        PieceType pt_from = type_of(pos.square(from));
+        PieceType pt_from = TypeOf(pos.square(from));
         if (entry.from_to_pro & kPromoted)
-          move = move_init(from, to, pt_from, type_of(pos.square(to)), true);
+          move = move_init(from, to, pt_from, TypeOf(pos.square(to)), true);
         else
-          move = move_init(from, to, pt_from, type_of(pos.square(to)), false);
+          move = move_init(from, to, pt_from, TypeOf(pos.square(to)), false);
       }
       score = entry.score;
     }

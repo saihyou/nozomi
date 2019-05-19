@@ -164,6 +164,7 @@ void MainThread::search() {
         std::count(root_moves_.begin(), root_moves_.end(), book_move)) {
       std::swap(root_moves_[0],
                 *std::find(root_moves_.begin(), root_moves_.end(), book_move));
+      root_moves_[0].score = kValueZero;
       search_best_thread = false;
       goto exit;
     }
