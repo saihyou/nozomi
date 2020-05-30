@@ -48,36 +48,30 @@ struct SearchStack {
   Move killers[2];
   Value static_eval;
   Eval::EvalParts eval_parts;
+  eval::Feature feature;
   Value material;
   bool evaluated;
   int stat_score;
   int move_count;
+  bool in_check;
 };
+
 namespace Search 
 {
 constexpr int kCounterMovePruneThreshold = 0;
 
-struct RootMove 
-{
+struct RootMove {
   explicit RootMove(Move m) : pv(1, m) {}
-    
-  bool 
-  operator<(const RootMove &m) const 
-  { 
-    return m.score < score; 
-  }
 
-  bool 
-  operator==(const Move &m) const 
-  { 
-    return pv[0] == m;
-  }
+  bool operator<(const RootMove &m) const { return m.score < score; }
 
-  bool
-  extract_ponder_from_tt(Position &pos);
+  bool operator==(const Move &m) const { return pv[0] == m; }
 
-  Value score          = -kValueInfinite;
+  bool extract_ponder_from_tt(Position &pos);
+
+  Value score = -kValueInfinite;
   Value previous_score = -kValueInfinite;
+  int best_move_count = 0;
   std::vector<Move> pv;
 };
 
@@ -133,7 +127,7 @@ extern SignalsType   Signals;
 extern LimitsType    Limits;
 extern StateStackPtr SetupStates;
 #ifdef APERY_BOOK
-extern AperyBook     BookManager;
+extern AperyBook BookManager;
 #else
 extern Book          BookManager;
 #endif

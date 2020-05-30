@@ -34,6 +34,7 @@ struct PositionData
   Value       value;
   Color       win;
   std::string next_move;
+  int total_ply;
 };
 
 struct Gradient

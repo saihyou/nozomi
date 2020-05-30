@@ -41,7 +41,7 @@ namespace USI
 void 
 on_eval(const Option &) 
 { 
-  Eval::init(); 
+  eval::Init(); 
 }
 
 void 

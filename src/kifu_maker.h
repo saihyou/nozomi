@@ -20,10 +20,13 @@
 #define _KIFU_MAKER_H_
 
 #include <iostream>
+#include "types.h"
+#include "position.h"
 
 namespace KifuMaker
 {
 void
 make(std::istringstream &is);
+bool search(Position &pos, size_t multi_pv, Depth search_depth);
 }
 #endif

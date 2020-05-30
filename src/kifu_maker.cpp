@@ -123,7 +123,7 @@ search(Position &pos, size_t multi_pv, Depth search_depth)
   std::memset(ss - 7, 0, 10 * sizeof(SearchStack));
   for (int i = 7; i > 0; --i)
     (ss - i)->continuation_history =
-        &thread->continuation_history_[kPieceNone][0];  // Use as sentinel
+        &thread->continuation_history_[0][0][kPieceNone][0];  // Use as sentinel
 
   thread->root_moves_.clear();
   for (auto &m : MoveList<kLegalForSearch>(pos))
@@ -298,6 +298,7 @@ play_game(std::vector<PositionData> &position_list, std::vector<std::vector<std:
       win = ~pos.side_to_move();
       break;
     }
+
     Value v = thread->root_moves_[0].score;
 
     if (v < -kWinValue || v > kWinValue)
@@ -338,6 +339,7 @@ play_game(std::vector<PositionData> &position_list, std::vector<std::vector<std:
     for (auto &g : game)
     {
       g.win = win;
+      g.total_ply = pos.game_ply();
       position_list.push_back(g);
     }
   }
@@ -359,7 +361,6 @@ make(std::istringstream &is)
   std::vector<PositionData> position_list;
   int count = 0;
   int write_count = 0;
-  Options["USI_Hash"] = 512;
   while (true)
   {
     play_game(position_list, book);
@@ -384,6 +385,7 @@ make(std::istringstream &is)
         else
           out_file << ",d";
         out_file << "," << m.next_move;
+        out_file << "," << m.total_ply;
         out_file << std::endl;
       }
       out_file.close();

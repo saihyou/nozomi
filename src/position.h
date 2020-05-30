@@ -1,6 +1,6 @@
 ﻿/*
-  nozomi, a USI shogi playing engine derived from Stockfish (chess playing engin)
-  Copyright (C) 2016 Yuhei Ohmori
+  nozomi, a USI shogi playing engine derived from Stockfish (chess playing
+  engin) Copyright (C) 2016 Yuhei Ohmori
 
   nozomi is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -19,18 +19,18 @@
 #ifndef _POSITION_H_
 #define _POSITION_H_
 
-#include <cstddef>
 #include <stdint.h>
+#include <cstddef>
 #include <iostream>
+#include <memory>
 #include <sstream>
 #include <stack>
-#include <memory>
 #include "bit_board.h"
-#include "move.h"
 #include "evaluate.h"
+#include "move.h"
+#include "evaluate_nn.h"
 
-enum Repetition
-{
+enum Repetition {
   kNoRepetition,
   kRepetition,
   kPerpetualCheckWin,
@@ -41,8 +41,7 @@ enum Repetition
 
 class Thread;
 
-struct CheckInfo
-{
+struct CheckInfo {
   explicit CheckInfo(const Position &);
 
   BitBoard discover_check_candidates;
@@ -50,351 +49,229 @@ struct CheckInfo
   BitBoard check_squares[kPieceTypeMax];
 };
 
-struct StateInfo
-{
+struct StateInfo {
   int material;
   int pilies_from_null;
   int continuous_checks[kNumberOfColor];
-  Eval::KPPIndex black_kpp_list[Eval::kListNum];
-  Eval::KPPIndex white_kpp_list[Eval::kListNum];
   uint8_t list_index_move;
   uint8_t list_index_capture;
+  Eval::KPPIndex changed_value[kNumberOfColor][2];
 
   uint64_t board_key;
   uint64_t hand_key;
-  Hand     hand_black;
+  Hand hand_black;
   BitBoard checkers_bb;
   StateInfo *previous;
 };
 
-class Position
-{
-  friend std::ostream& operator<<(std::ostream&, const Position&);
+class Position {
+  friend std::ostream &operator<<(std::ostream &, const Position &);
 
-public:
+ public:
   Position() {}
-  
-  Position(const Position& p, Thread *t) 
-  { 
+
+  Position(const Position &p, Thread *t) {
     *this = p;
     this_thread_ = t;
   }
 
-  Position(const std::string &f, Thread *t)
-  {
-    set(f, t);
-  }
+  Position(const std::string &f, Thread *t) { set(f, t); }
 
-  Position &
-  operator=(const Position &);
+  Position &operator=(const Position &);
 
-  static void 
-  initialize();
+  static void initialize();
 
   // Text input/output
-  void 
-  set(const std::string &sfen, Thread *t);
+  void set(const std::string &sfen, Thread *t);
 
   // Position representation
-  BitBoard 
-  pieces(PieceType type, Color color) const;
-  PieceType 
-  piece_type(Square sq) const;
-  Square 
-  square_king(Color color) const;
-  Hand
-  hand(Color color) const;
-  Piece 
-  square(Square sq) const;
+  BitBoard pieces(PieceType type, Color color) const;
+  PieceType piece_type(Square sq) const;
+  Square square_king(Color color) const;
+  Hand hand(Color color) const;
+  Piece square(Square sq) const;
 
   // Properties of moves
-  bool 
-  is_attacked(Square sq, Color color, const BitBoard &occupied) const;
-  bool
-  is_king_discover(Square from, Square to, Color color, const BitBoard &pinned) const;
+  bool is_attacked(Square sq, Color color, const BitBoard &occupied) const;
+  bool is_king_discover(Square from, Square to, Color color,
+                        const BitBoard &pinned) const;
 
-  bool 
-  in_check() const;
-  bool 
-  gives_check(Move m, const CheckInfo &ci) const;
-  bool
-  gives_mate_by_drop_pawn(Square sq) const;
+  bool in_check() const;
+  bool gives_check(Move m, const CheckInfo &ci) const;
+  bool gives_mate_by_drop_pawn(Square sq) const;
 
   // Doing and undoing moves
-  void
-  do_move(Move m, StateInfo &new_state, bool gives_check);
-  void 
-  do_move(Move m, StateInfo &new_state);
-  void
-  do_null_move(StateInfo &new_state);
-  void 
-  undo_move(Move m);
-  void 
-  undo_null_move();
+  void do_move(Move m, StateInfo &new_state, bool gives_check);
+  void do_move(Move m, StateInfo &new_state);
+  void do_null_move(StateInfo &new_state);
+  void undo_move(Move m);
+  void undo_null_move();
 
-  void
-  move_temporary(Square from, Square to, PieceType type, PieceType capture);
-  void
-  move_with_promotion_temporary(Square from, Square to, PieceType type, PieceType capture);
+  void move_temporary(Square from, Square to, PieceType type,
+                      PieceType capture);
+  void move_with_promotion_temporary(Square from, Square to, PieceType type,
+                                     PieceType capture);
 
+  Color side_to_move() const;
+  uint64_t nodes_searched() const;
+  void set_nodes_searched(uint64_t value);
+  int game_ply() const;
+  Thread *this_thread() const;
 
-  Color 
-  side_to_move() const;
-  uint64_t 
-  nodes_searched() const;
-  void 
-  set_nodes_searched(uint64_t value);
-  int 
-  game_ply() const;
-  Thread *
-  this_thread() const;
+  BitBoard occupied() const;
+  BitBoard rook_dragon(Color color) const;
+  BitBoard bishop_horse(Color color) const;
+  BitBoard total_gold(Color color) const;
+  BitBoard horse_dragon_king(Color color) const;
 
-  BitBoard 
-  occupied() const;
-  BitBoard 
-  rook_dragon(Color color) const;
-  BitBoard 
-  bishop_horse(Color color) const;
-  BitBoard 
-  total_gold(Color color) const;
-  BitBoard 
-  horse_dragon_king(Color color) const;
+  BitBoard attacks_to(Square sq, Color color, const BitBoard &occupied) const;
+  BitBoard attacks_to(Square sq, const BitBoard &occupied) const;
 
-  BitBoard 
-  attacks_to(Square sq, Color color, const BitBoard &occupied) const;
-  BitBoard
-  attacks_to(Square sq, const BitBoard &occupied) const;
+  uint64_t key() const;
+  uint64_t key_after(Move m) const;
+  int material() const;
+  bool see_ge(Move m, Value v) const;
+  bool see_ge_reverse_move(Move m, Value v) const;
 
+  Repetition in_repetition() const;
+  uint64_t exclusion_key() const;
+  int continuous_checks(Color c) const;
 
-  uint64_t
-  key() const;
-  uint64_t
-  key_after(Move m) const;
-  int 
-  material() const;
-  bool
-  see_ge(Move m, Value v) const;
-  bool
-  see_ge_reverse_move(Move m, Value v) const;
+  const Eval::KPPIndex *black_kpp_list() const;
+  const Eval::KPPIndex *white_kpp_list() const;
+  int chenged_index_num() const;
+  const Eval::KPPIndex *old_index_value(Color c) const;
+  const Eval::KPPIndex *new_index_value(Color c) const;
 
-  Repetition 
-  in_repetition() const;
-  uint64_t 
-  exclusion_key() const;
-  int 
-  continuous_checks(Color c) const;
+  void print() const;
 
-  Eval::KPPIndex *
-  black_kpp_list() const;
-  Eval::KPPIndex *
-  white_kpp_list() const;
-  Eval::KPPIndex *
-  prev_black_kpp_list() const;
-  Eval::KPPIndex *
-  prev_white_kpp_list() const;
-  uint8_t
-  list_index_capture() const;
-  uint8_t
-  list_index_move() const;
+  BitBoard pinned_pieces(Color c) const;
+  BitBoard pinned_pieces(Color c, const BitBoard &occupied) const;
+  BitBoard discovered_check_candidates() const;
+  BitBoard checkers_bitboard() const;
+  bool legal(Move m, BitBoard &pinned) const;
+  bool pseudo_legal(Move m) const;
+  bool validate() const;
+  bool is_decralation_win() const;
 
-  void
-  print() const;
+ private:
+  void clear();
 
-  BitBoard
-  pinned_pieces(Color c) const;
-  BitBoard
-  pinned_pieces(Color c, const BitBoard &occupied) const;
-  BitBoard
-  discovered_check_candidates() const;
-  BitBoard
-  checkers_bitboard() const;
-  bool
-  legal(Move m, BitBoard &pinned) const;
-  bool
-  pseudo_legal(Move m) const;
-  bool
-  validate() const;
-  bool
-  is_decralation_win() const;
+  void put_piece(Piece piece, Square sq);
+  int compute_material() const;
+  bool is_pawn_exist(Square sq, Color color) const;
+  BitBoard check_blockers(Color c, Color king_color,
+                          const BitBoard &occupied) const;
+  bool see_ge(Move m, Value v, Color c) const;
 
-private:
-  void 
-  clear();
-
-  void 
-  put_piece(Piece piece, Square sq);
-  int 
-  compute_material() const;
-  bool 
-  is_pawn_exist(Square sq, Color color) const;
-  BitBoard
-  check_blockers(Color c, Color king_color, const BitBoard &occupied) const;
-  bool
-  see_ge(Move m, Value v, Color c) const;
- 
-  BitBoard   piece_board_[kNumberOfColor][kPieceTypeMax];
-  BitBoard   occupied_;
-  Hand       hand_[kNumberOfColor];
-  Piece      squares_[kBoardSquare];
-  Square     square_king_[kNumberOfColor];
-  uint8_t    kpp_list_index_[kSquareHand];
-  Color      side_to_move_;
-  StateInfo  start_state_;
-  uint64_t   nodes_searched_;
+  BitBoard piece_board_[kNumberOfColor][kPieceTypeMax];
+  BitBoard occupied_;
+  Hand hand_[kNumberOfColor];
+  Piece squares_[kBoardSquare];
+  Square square_king_[kNumberOfColor];
+  uint8_t kpp_list_index_[kSquareHand];
+  Eval::KPPIndex kpp_list_[kNumberOfColor][eval::kKpListLength];
+  Eval::KPPIndex new_index_value_[kNumberOfColor][2];
+  int chenged_index_num_;
+  Color side_to_move_;
+  StateInfo start_state_;
+  uint64_t nodes_searched_;
   StateInfo *state_;
-  int        game_ply_;
-  Thread    *this_thread_;
+  int game_ply_;
+  Thread *this_thread_;
 };
 
-inline bool
-Position::see_ge(Move m, Value v) const
-{
+inline bool Position::see_ge(Move m, Value v) const {
   return see_ge(m, v, side_to_move_);
 }
 
-inline bool
-Position::see_ge_reverse_move(Move m, Value v) const
-{
+inline bool Position::see_ge_reverse_move(Move m, Value v) const {
   const Square to = move_from(m);
-  if (to >= kBoardSquare)
-    return v >= kValueZero;
+  if (to >= kBoardSquare) return v >= kValueZero;
 
   const Square from = move_to(m);
-  // 本来ならcaptureも考慮すべきかもだけどnon captureの場面でしか呼ばれないので無視する
-  return see_ge(move_init(from, to, move_piece_type(m), kPieceNone, false), v, ~side_to_move_);
+  // 本来ならcaptureも考慮すべきかもだけどnon
+  // captureの場面でしか呼ばれないので無視する
+  return see_ge(move_init(from, to, move_piece_type(m), kPieceNone, false), v,
+                ~side_to_move_);
 }
 
-inline int
-Position::continuous_checks(Color c) const
-{
+inline int Position::continuous_checks(Color c) const {
   return state_->continuous_checks[c];
 }
 
-inline uint64_t
-Position::nodes_searched() const
-{
-  return nodes_searched_;
-}
+inline uint64_t Position::nodes_searched() const { return nodes_searched_; }
 
-inline void 
-Position::set_nodes_searched(uint64_t value)
-{
+inline void Position::set_nodes_searched(uint64_t value) {
   nodes_searched_ = value;
 }
 
-inline int 
-Position::game_ply() const
-{
-  return game_ply_;
-}
+inline int Position::game_ply() const { return game_ply_; }
 
-inline BitBoard 
-Position::pieces(PieceType type, Color color) const
-{
+inline BitBoard Position::pieces(PieceType type, Color color) const {
   return piece_board_[color][type];
 }
 
-inline PieceType
-Position::piece_type(Square sq) const
-{
+inline PieceType Position::piece_type(Square sq) const {
   return TypeOf(squares_[sq]);
 }
 
-inline Square
-Position::square_king(Color color) const
-{
+inline Square Position::square_king(Color color) const {
   return static_cast<Square>(square_king_[color]);
 }
 
-inline Color
-Position::side_to_move() const
-{
-  return side_to_move_;
-}
+inline Color Position::side_to_move() const { return side_to_move_; }
 
-inline Hand
-Position::hand(Color color) const
-{
-  return hand_[color];
-}
+inline Hand Position::hand(Color color) const { return hand_[color]; }
 
-inline Piece
-Position::square(Square sq) const
-{
-  return squares_[sq];
-}
+inline Piece Position::square(Square sq) const { return squares_[sq]; }
 
-inline BitBoard
-Position::occupied() const
-{
-  return occupied_;
-}
+inline BitBoard Position::occupied() const { return occupied_; }
 
-inline BitBoard
-Position::rook_dragon(Color color) const
-{
+inline BitBoard Position::rook_dragon(Color color) const {
   return piece_board_[color][kRook] | piece_board_[color][kDragon];
 }
 
-inline BitBoard
-Position::bishop_horse(Color color) const
-{
+inline BitBoard Position::bishop_horse(Color color) const {
   return piece_board_[color][kBishop] | piece_board_[color][kHorse];
 }
 
-inline BitBoard
-Position::total_gold(Color color) const
-{
-  return piece_board_[color][kGold] | piece_board_[color][kPromotedPawn] | piece_board_[color][kPromotedKnight] | piece_board_[color][kPromotedLance] | piece_board_[color][kPromotedSilver];
+inline BitBoard Position::total_gold(Color color) const {
+  return piece_board_[color][kGold] | piece_board_[color][kPromotedPawn] |
+         piece_board_[color][kPromotedKnight] |
+         piece_board_[color][kPromotedLance] |
+         piece_board_[color][kPromotedSilver];
 }
 
-inline BitBoard
-Position::horse_dragon_king(Color color) const
-{
-  return piece_board_[color][kHorse] | piece_board_[color][kDragon] | piece_board_[color][kKing];
+inline BitBoard Position::horse_dragon_king(Color color) const {
+  return piece_board_[color][kHorse] | piece_board_[color][kDragon] |
+         piece_board_[color][kKing];
 }
 
-inline bool
-Position::is_king_discover(Square from, Square to, Color color, const BitBoard &pinned) const
-{
-  return (pinned & MaskTable[from]).test() && !aligned(from, to, square_king_[color]);
+inline bool Position::is_king_discover(Square from, Square to, Color color,
+                                       const BitBoard &pinned) const {
+  return (pinned & MaskTable[from]).test() &&
+         !aligned(from, to, square_king_[color]);
 }
 
-inline bool 
-Position::in_check() const
-{
-  return state_->checkers_bb.test();
-}
+inline bool Position::in_check() const { return state_->checkers_bb.test(); }
 
-inline BitBoard
-Position::checkers_bitboard() const
-{
+inline BitBoard Position::checkers_bitboard() const {
   return state_->checkers_bb;
 }
 
-inline uint64_t
-Position::key() const
-{
+inline uint64_t Position::key() const {
   return state_->board_key + state_->hand_key;
 }
 
-inline int
-Position::material() const
-{
-  return state_->material;
-}
+inline int Position::material() const { return state_->material; }
 
-inline Thread *
-Position::this_thread() const
-{
-  return this_thread_;
-}
+inline Thread *Position::this_thread() const { return this_thread_; }
 
 // sqに利いている駒を列挙する
 FORCE_INLINE
-BitBoard
-Position::attacks_to(Square sq, Color color, const BitBoard &occupied) const
-{
+BitBoard Position::attacks_to(Square sq, Color color,
+                              const BitBoard &occupied) const {
   Color enemy = ~color;
   BitBoard bb = piece_board_[color][kPawn] & PawnAttacksTable[enemy][sq];
 
@@ -403,15 +280,15 @@ Position::attacks_to(Square sq, Color color, const BitBoard &occupied) const
   bb.and_or(total_gold(color), GoldAttacksTable[enemy][sq]);
   bb.and_or(horse_dragon_king(color), KingAttacksTable[sq]);
   bb.and_or(bishop_horse(color), bishop_attack(occupied, sq));
-  bb.and_or((rook_dragon(color) | (piece_board_[color][kLance] & LanceAttacksTable[enemy][sq][0])), rook_attack(occupied, sq));
+  bb.and_or((rook_dragon(color) |
+             (piece_board_[color][kLance] & LanceAttacksTable[enemy][sq][0])),
+            rook_attack(occupied, sq));
 
   return bb;
 }
 
 FORCE_INLINE
-BitBoard
-Position::attacks_to(Square sq, const BitBoard &occupied) const
-{
+BitBoard Position::attacks_to(Square sq, const BitBoard &occupied) const {
   Color color = side_to_move_;
   Color enemy = ~side_to_move_;
   BitBoard bb = piece_board_[color][kPawn] & PawnAttacksTable[enemy][sq];
@@ -424,28 +301,22 @@ Position::attacks_to(Square sq, const BitBoard &occupied) const
   bb.and_or(piece_board_[enemy][kSilver], SilverAttacksTable[color][sq]);
   bb.and_or(total_gold(enemy), GoldAttacksTable[color][sq]);
 
-  bb.and_or((horse_dragon_king(color) | horse_dragon_king(enemy)), KingAttacksTable[sq]);
-  bb.and_or((bishop_horse(color) | bishop_horse(enemy)), bishop_attack(occupied, sq));
-  bb.and_or
-  (
-    (
-      (rook_dragon(color) | rook_dragon(enemy))
-      |
-      (piece_board_[color][kLance] & LanceAttacksTable[enemy][sq][0])
-      |
-      (piece_board_[enemy][kLance] & LanceAttacksTable[color][sq][0])
-    ),
-    rook_attack(occupied, sq)
-  );
+  bb.and_or((horse_dragon_king(color) | horse_dragon_king(enemy)),
+            KingAttacksTable[sq]);
+  bb.and_or((bishop_horse(color) | bishop_horse(enemy)),
+            bishop_attack(occupied, sq));
+  bb.and_or(((rook_dragon(color) | rook_dragon(enemy)) |
+             (piece_board_[color][kLance] & LanceAttacksTable[enemy][sq][0]) |
+             (piece_board_[enemy][kLance] & LanceAttacksTable[color][sq][0])),
+            rook_attack(occupied, sq));
 
   return bb;
 }
 
 // sqに対して敵の駒のききがあるか
 FORCE_INLINE
-bool
-Position::is_attacked(Square sq, Color color, const BitBoard &occupied) const
-{
+bool Position::is_attacked(Square sq, Color color,
+                           const BitBoard &occupied) const {
   Color enemy = ~color;
   BitBoard bb = piece_board_[enemy][kPawn] & PawnAttacksTable[color][sq];
 
@@ -454,93 +325,65 @@ Position::is_attacked(Square sq, Color color, const BitBoard &occupied) const
   bb.and_or(total_gold(enemy), GoldAttacksTable[color][sq]);
   bb.and_or(horse_dragon_king(enemy), KingAttacksTable[sq]);
   bb.and_or(bishop_horse(enemy), bishop_attack(occupied, sq));
-  bb.and_or(rook_dragon(enemy) | (piece_board_[enemy][kLance] & LanceAttacksTable[color][sq][0]), rook_attack(occupied, sq));
+  bb.and_or(rook_dragon(enemy) |
+                (piece_board_[enemy][kLance] & LanceAttacksTable[color][sq][0]),
+            rook_attack(occupied, sq));
 
   return bb.test();
 }
 
-inline BitBoard
-Position::pinned_pieces(Color c) const
-{
+inline BitBoard Position::pinned_pieces(Color c) const {
   return check_blockers(c, c, occupied());
 }
 
-inline BitBoard
-Position::pinned_pieces(Color c, const BitBoard &occupied) const
-{
+inline BitBoard Position::pinned_pieces(Color c,
+                                        const BitBoard &occupied) const {
   return check_blockers(c, c, occupied);
 }
 
-inline BitBoard
-Position::discovered_check_candidates() const
-{
+inline BitBoard Position::discovered_check_candidates() const {
   return check_blockers(side_to_move_, ~side_to_move_, occupied());
 }
 
-inline bool
-Position::legal(Move m, BitBoard &pinned) const
-{
+inline bool Position::legal(Move m, BitBoard &pinned) const {
   Square from = move_from(m);
 
-  if (from >= kBoardSquare)
-    return true;
+  if (from >= kBoardSquare) return true;
 
   PieceType type = move_piece_type(m);
   Square to = move_to(m);
-  if (type == kKing)
-  {
+  if (type == kKing) {
     BitBoard oc = occupied();
     oc.xor_bit(from);
     return !is_attacked(to, side_to_move_, oc);
   }
 
-  return !pinned.test() || !((pinned & MaskTable[from]).test()) || aligned(from, to, square_king_[side_to_move_]);
+  return !pinned.test() || !((pinned & MaskTable[from]).test()) ||
+         aligned(from, to, square_king_[side_to_move_]);
 }
 
-inline Eval::KPPIndex *
-Position::black_kpp_list() const
-{
-  return state_->black_kpp_list;
+inline const Eval::KPPIndex *Position::black_kpp_list() const {
+  return kpp_list_[kBlack];
 }
 
-inline Eval::KPPIndex *
-Position::white_kpp_list() const
-{
-  return state_->white_kpp_list;
+inline const Eval::KPPIndex *Position::white_kpp_list() const {
+  return kpp_list_[kWhite];
 }
 
-inline Eval::KPPIndex *
-Position::prev_black_kpp_list() const
-{
-  return state_->previous->black_kpp_list;
+inline int Position::chenged_index_num() const { return chenged_index_num_; }
+inline const Eval::KPPIndex *Position::old_index_value(Color c) const {
+  return state_->changed_value[c];
+}
+inline const Eval::KPPIndex *Position::new_index_value(Color c) const {
+  return new_index_value_[c];
 }
 
-inline Eval::KPPIndex *
-Position::prev_white_kpp_list() const
-{
-  return state_->previous->white_kpp_list;
-}
-
-inline uint8_t
-Position::list_index_capture() const
-{
-  return state_->list_index_capture;
-}
-
-inline uint8_t
-Position::list_index_move() const
-{
-  return state_->list_index_move;
-}
-
-inline void
-Position::move_temporary(Square from, Square to, PieceType type, PieceType capture)
-{
-  const BitBoard  set_clear = MaskTable[from] | MaskTable[to];
+inline void Position::move_temporary(Square from, Square to, PieceType type,
+                                     PieceType capture) {
+  const BitBoard set_clear = MaskTable[from] | MaskTable[to];
   piece_board_[side_to_move_][kOccupied] ^= set_clear;
   piece_board_[side_to_move_][type] ^= set_clear;
-  if (capture != kPieceNone)
-  {
+  if (capture != kPieceNone) {
     Color enemy = ~side_to_move_;
     piece_board_[enemy][capture].xor_bit(to);
     piece_board_[enemy][kOccupied].xor_bit(to);
@@ -548,15 +391,14 @@ Position::move_temporary(Square from, Square to, PieceType type, PieceType captu
   occupied_ = piece_board_[kBlack][kOccupied] | piece_board_[kWhite][kOccupied];
 }
 
-inline void
-Position::move_with_promotion_temporary(Square from, Square to, PieceType type, PieceType capture)
-{
-  const BitBoard  set_clear = MaskTable[from] | MaskTable[to];
+inline void Position::move_with_promotion_temporary(Square from, Square to,
+                                                    PieceType type,
+                                                    PieceType capture) {
+  const BitBoard set_clear = MaskTable[from] | MaskTable[to];
   piece_board_[side_to_move_][kOccupied] ^= set_clear;
   piece_board_[side_to_move_][type].xor_bit(from);
   piece_board_[side_to_move_][type + kFlagPromoted].xor_bit(to);
-  if (capture != kPieceNone)
-  {
+  if (capture != kPieceNone) {
     Color enemy = ~side_to_move_;
     piece_board_[enemy][capture].xor_bit(to);
     piece_board_[enemy][kOccupied].xor_bit(to);

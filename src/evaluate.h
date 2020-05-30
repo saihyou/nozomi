@@ -75,6 +75,10 @@ constexpr KPPIndex operator+(KPPIndex d1, int i) {
   return KPPIndex(int(d1) + i);
 }
 
+constexpr KPPIndex operator-(KPPIndex d1, int i) {
+  return KPPIndex(int(d1) - i);
+}
+
 constexpr KPPIndex PieceToIndexBlackTable[kPieceMax] = {
     kFENone,   // kEmpty
     kFPawn,    // kBlackPawn
@@ -171,6 +175,15 @@ constexpr int KPPHandIndex[8] = {
     12,  // Rook
     8    // Gold
 };
+
+inline KPPIndex Flip(KPPIndex index) {
+  if (index < KPPIndex::kFEHandEnd) return index;
+
+  Square square =
+      static_cast<Square>((index - KPPIndex::kFEHandEnd) % 81);
+  KPPIndex raw_index = index - square;
+  return raw_index + Flip(square);
+}
 
 enum PieceValue {
   kPawnValue = 88,

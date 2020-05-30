@@ -157,18 +157,13 @@ enum Direction
   kDirFlagDiag = 0x04
 };
 
-enum Depth 
-{
-  kOnePly = 1,
-
-  kDepthZero = 0,
-  kDepthQsChecks = 0,
-  kDepthQsNoChecks = -1,
-  kDepthQsRecaptues = -5,
-
-  kDepthNone = -6,
-  kDepthMax = kMaxPly
-};
+using Depth = int;
+constexpr Depth kOnePly = 1;
+constexpr Depth kDepthZero = 0;
+constexpr Depth kDepthQsChecks = 0;
+constexpr Depth kDepthQsNoChecks = -1;
+constexpr Depth kDepthQsRecaptues = -5;
+constexpr Depth kDepthNone = -6;
 
 enum Square
 {
@@ -230,22 +225,23 @@ enum Rank
   kNumberOfRank
 };
 
-#define ENABLE_SAFE_OPERATORS_ON(T)                                   \
-  constexpr T operator+(const T d1, const T d2) {                     \
-    return T(int(d1) + int(d2));                                      \
-  }                                                                   \
-  constexpr T operator+(T d1, int i) { return T(int(d1) + i); }       \
-  constexpr T operator-(const T d1, const T d2) {                     \
-    return T(int(d1) - int(d2));                                      \
-  }                                                                   \
-  constexpr T operator*(int i, const T d) { return T(i * int(d)); }   \
-  constexpr T operator*(const T d, int i) { return T(int(d) * i); }   \
-  constexpr T operator*(const T d1, const T d2) {                     \
-    return T(int(d1) * int(d2));                                      \
-  }                                                                   \
-  constexpr T operator-(const T d) { return T(-int(d)); }             \
-  constexpr T& operator+=(T& d1, const T d2) { return d1 = d1 + d2; } \
-  constexpr T& operator-=(T& d1, const T d2) { return d1 = d1 - d2; } \
+#define ENABLE_SAFE_OPERATORS_ON(T)                                           \
+  constexpr T operator+(const T d1, const T d2) {                             \
+    return T(int(d1) + int(d2));                                              \
+  }                                                                           \
+  constexpr T operator+(T d1, int i) { return T(int(d1) + i); }               \
+  constexpr T operator-(const T d1, const T d2) {                             \
+    return T(int(d1) - int(d2));                                              \
+  }                                                                           \
+  constexpr T operator-(const T d1, const int d2) { return T(int(d1) - d2); } \
+  constexpr T operator*(int i, const T d) { return T(i * int(d)); }           \
+  constexpr T operator*(const T d, int i) { return T(int(d) * i); }           \
+  constexpr T operator*(const T d1, const T d2) {                             \
+    return T(int(d1) * int(d2));                                              \
+  }                                                                           \
+  constexpr T operator-(const T d) { return T(-int(d)); }                     \
+  constexpr T& operator+=(T& d1, const T d2) { return d1 = d1 + d2; }         \
+  constexpr T& operator-=(T& d1, const T d2) { return d1 = d1 - d2; }         \
   constexpr T& operator*=(T& d, int i) { return d = T(int(d) * i); }
 
 #define ENABLE_OPERATORS_ON(T)                                      \
@@ -259,12 +255,10 @@ ENABLE_OPERATORS_ON(Value)
 ENABLE_OPERATORS_ON(PieceType)
 ENABLE_OPERATORS_ON(Piece)
 ENABLE_OPERATORS_ON(Color)
-ENABLE_OPERATORS_ON(Depth)
 ENABLE_OPERATORS_ON(Square)
 ENABLE_OPERATORS_ON(File)
 ENABLE_OPERATORS_ON(Rank)
 
-constexpr Value operator-(Value v, int i) { return Value(int(v) - i); }
 constexpr Value& operator+=(Value& v, int i) { return v = v + i; }
 
 #undef ENABLE_OPERATORS_ON
@@ -305,6 +299,12 @@ inline bool CanPromote(Color color, uint32_t from, uint32_t to) {
     return (to < k9D || from < k9D) ? true : false;
   else
     return (to > k1F || from > k1F) ? true : false;
+}
+
+inline Square Flip(Square sq) {
+  int x = sq % 9;
+  int y = sq / 9;
+  return Square(y * 9 + (kFile9 - x));
 }
 
 #endif

@@ -28,6 +28,7 @@
 #include "search.h"
 #include "thread.h"
 #include "usi.h"
+#include "stats.h"
 
 using namespace Search;
 
@@ -55,17 +56,23 @@ Thread::~Thread()
 }
 
 void Thread::Clear() {
+  eval_hash_.Clear();
   counter_moves_.fill(kMoveNone);
   main_history_.fill(0);
+  low_ply_history_.fill(0);
   capture_history_.fill(0);
 
-  for (auto &to : continuation_history_)
-    for (auto &h : to) h->fill(0);
-
-  continuation_history_[kPieceNone][0]->fill(
-      Search::kCounterMovePruneThreshold - 1);
-  eval_hash_.Clear();
-  kpp_list_.Clear();
+  for (bool in_check : {false, true}) {
+    for (StatsType c : {StatsType::kNoCaptures, StatsType::kCaptures}) {
+      for (auto &to : continuation_history_[in_check][static_cast<int>(c)]) {
+        for (auto &h : to) {
+          h->fill(0);
+        }
+      }
+      continuation_history_[in_check][static_cast<int>(c)][kPieceNone][0]->fill(
+          Search::kCounterMovePruneThreshold - 1);
+    }
+  }
 }
 
 
@@ -82,6 +89,13 @@ Thread::wait(std::atomic_bool &condition)
 
   std::unique_lock<std::mutex> lk(mutex_);
   sleep_condition_.wait(lk, [&] { return bool(condition); });
+}
+
+int Thread::BestMoveCount(Move move) const {
+  auto rm = std::find(root_moves_.begin() + pv_index_,
+                      root_moves_.begin() + pv_last_, move);
+
+  return rm != root_moves_.begin() + pv_last_ ? rm->best_move_count : 0;
 }
 
 void

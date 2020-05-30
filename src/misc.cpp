@@ -30,7 +30,7 @@
 
 using namespace std;
 
-static const string kVersion = "";
+static const string kVersion = "20200530";
 
 const string
 engine_info(bool to_usi) 

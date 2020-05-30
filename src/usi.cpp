@@ -274,6 +274,11 @@ USI::loop(int argc, char* argv[])
     {
       Move move = search_mate1ply(pos);
       sync_cout << USI::format_move(move) << sync_endl;
+    } else if (token == "eval") {
+      SearchStack ss[2];
+      ss[0].evaluated = false;
+      ss[1].evaluated = false;
+      sync_cout << eval::Evaluate(pos, &ss[1]) << sync_endl;
     }
     else
     {

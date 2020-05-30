@@ -69,6 +69,7 @@ struct Stats<T, D, Size> : public std::array<StatsEntry<T, D>, Size> {};
 
 /// In stats table, D=0 means that the template parameter is not used
 enum StatsParams { kNotUsed = 0 };
+enum class StatsType : int { kNoCaptures, kCaptures };
 
 /// ButterflyHistory records how often quiet moves have been successful or
 /// unsuccessful during the current search, and is used for reduction and move
@@ -97,5 +98,14 @@ typedef Stats<int16_t, 29952, kPieceMax, kBoardSquare> PieceToHistory;
 /// based on PieceToHistory instead of ButterflyBoards.
 typedef Stats<PieceToHistory, kNotUsed, kPieceMax, kBoardSquare>
     ContinuationHistory;
+
+/// LowPlyHistory at higher depths records successful quiet moves on plies 0 to
+/// 3 and quiet moves which are/were in the PV (ttPv) It get cleared with each
+/// new search and get filled during iterative deepening
+constexpr int kMaxLowPlyHistory = 4;
+typedef Stats<int16_t, 10692, kMaxLowPlyHistory,
+              int(kBoardSquare) * int(kBoardSquare)>
+    LowPlyHistory;
+
 
 #endif

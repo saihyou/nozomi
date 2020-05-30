@@ -59,13 +59,13 @@ static const char* Defaults[] =
 };
 
 void
-benchmark(const Position &current, istream &is) 
+benchmark(const Position& current, istream& is) 
 {
   string token;
   Search::LimitsType limits;
   vector<string> sfens;
 
-  string tt_size    = (is >> token) ? token : "32";
+  string tt_size    = (is >> token) ? token : "1024";
   string threads    = (is >> token) ? token : "1";
   string limit      = (is >> token) ? token : "13";
   string sfen_file  = (is >> token) ? token : "default";

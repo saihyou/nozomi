@@ -41,10 +41,11 @@ class MovePicker {
   MovePicker(const Position &, Move, Value, const CapturePieceToHistory *);
   MovePicker(const Position &, Move, Depth, const ButterflyHistory *,
              const CapturePieceToHistory *, const PieceToHistory **, Square);
-  MovePicker(const Position &, const CheckInfo *, Move, Depth, const ButterflyHistory *,
+  MovePicker(const Position &, const CheckInfo *, Move, Depth,
+             const ButterflyHistory *, const LowPlyHistory *,
              const CapturePieceToHistory *, const PieceToHistory **, Move,
-             Move *);
-  Move NextMove(int *score = nullptr);
+             Move *, int);
+  Move NextMove();
 
  private:
   template <PickType T, typename Pred>
@@ -57,6 +58,7 @@ class MovePicker {
   const Position &pos_;
   const CheckInfo *ci_;
   const ButterflyHistory *main_history_;
+  const LowPlyHistory *low_ply_history_;
   const CapturePieceToHistory *capture_history_;
   const PieceToHistory **continuation_history_;
   Move tt_move_;
@@ -68,6 +70,7 @@ class MovePicker {
   Square recapture_square_;
   Value threshold_;
   Depth depth_;
+  int ply_;
   ExtMove moves_[kMaxMoves];
 };
 

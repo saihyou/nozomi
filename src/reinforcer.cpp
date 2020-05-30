@@ -66,7 +66,7 @@ LearnEval *g_learning_param;
 #endif
 double g_learning_rate;
 
-constexpr double kFloatDivider = 1024.0;
+constexpr double kFloatDivider = 1.0;
 constexpr int kBatchSize = 200000;
 
 void store_to_normal_value(const LearnEval &eval) {
@@ -120,7 +120,7 @@ void load_to_floating_value(LearnEval &eval) {
 namespace {
 LearnFloatingPoint tanh(int32_t v) {
   return static_cast<LearnFloatingPoint>(
-      std::tanh(static_cast<double>(v) / 800.0));
+      std::tanh(static_cast<double>(v) / 1000.0));
 }
 
 LearnFloatingPoint dtanh(int32_t v) {
@@ -185,9 +185,10 @@ void Gradient::increment(const Position &pos, LearnFloatingPoint delta,
 
     Square inv_bk = Eval::inverse(wk);
     Square inv_wk = Eval::inverse(bk);
+    int inv_k0 = inverse_black_white_kpp_index(k0);
     KingPosition inv_bksq(inv_bk);
     BoardPosition inv_wksq(inv_wk);
-    int inv_pi = k1;
+    int inv_pi = inv_k0;
     if (inv_bksq.swap) {
       inv_wksq.x = kFile9 - inv_wksq.x;
       inv_pi = inverse_file_kpp_index(inv_pi);

@@ -23,7 +23,9 @@
 */
 
 #include "move_picker.h"
+
 #include <cassert>
+
 #include "move_probability.h"
 #include "stats.h"
 
@@ -47,10 +49,7 @@ enum Stages {
   kQcaptureInit,
   kQcapture,
   kQcheckInit,
-  kQcheck,
-  kProbSearchTt,
-  kProbSearchInit,
-  kProbSearch
+  kQcheck
 };
 
 constexpr int kRawPieceValueTable[kPieceTypeMax] = {
@@ -96,21 +95,23 @@ void PartialInsertionSort(ExtMove *begin, ExtMove *end, int limit) {
 /// MovePicker constructor for the main search
 MovePicker::MovePicker(const Position &p, const CheckInfo *ci, Move ttm,
                        Depth d, const ButterflyHistory *mh,
+                       const LowPlyHistory *lp,
                        const CapturePieceToHistory *cph,
-                       const PieceToHistory **ch, Move cm, Move *killers)
+                       const PieceToHistory **ch, Move cm, Move *killers, int ply)
     : pos_(p),
       ci_(ci),
       main_history_(mh),
+      low_ply_history_(lp),
       capture_history_(cph),
       continuation_history_(ch),
       refutations_{{killers[0], 0}, {killers[1], 0}, {cm, 0}},
-      depth_(d) {
+      depth_(d), ply_(ply) {
   assert(d > kDepthZero);
 
   if (pos_.in_check()) {
     stage_ = kEvasionTt;
   } else {
-    stage_ = (depth_ >= 16 * kOnePly) ? kProbSearchTt : kMainTt;
+    stage_ = kMainTt;
   }
   tt_move_ = ttm && pos_.pseudo_legal(ttm) ? ttm : kMoveNone;
   stage_ += (tt_move_ == kMoveNone);
@@ -169,10 +170,11 @@ void MovePicker::Score() {
               8;
     } else if (Type == kQuiets) {
       m.value = (*main_history_)[us][FromTo(m)] +
-                (*continuation_history_[0])[move_piece(m, us)][move_to(m)] +
-                (*continuation_history_[1])[move_piece(m, us)][move_to(m)] +
-                (*continuation_history_[3])[move_piece(m, us)][move_to(m)] +
-        (*continuation_history_[5])[move_piece(m, us)][move_to(m)] / 2;
+                2 * (*continuation_history_[0])[move_piece(m, us)][move_to(m)] +
+                2 * (*continuation_history_[1])[move_piece(m, us)][move_to(m)] +
+                2 * (*continuation_history_[3])[move_piece(m, us)][move_to(m)] +
+                (*continuation_history_[5])[move_piece(m, us)][move_to(m)] +
+                (ply_ < kMaxLowPlyHistory ? 4 * (*low_ply_history_)[ply_][FromTo(m)] : 0);
     } else {
       if (move_capture(m)) {
         m.value =
@@ -205,14 +207,13 @@ Move MovePicker::Select(Pred filter) {
 /// class. It returns a new pseudo legal move every time it is called until
 /// there are no more moves left, picking the move with the highest score from a
 /// list of generated moves.
-Move MovePicker::NextMove(int *score) {
+Move MovePicker::NextMove() {
 top:
   switch (stage_) {
     case kMainTt:
     case kEvasionTt:
     case kQsearchTt:
     case kProbcutTt:
-    case kProbSearchTt:
       ++stage_;
       return tt_move_;
 
@@ -273,7 +274,7 @@ top:
       end_moves_ = generate<kQuiets>(pos_, cur_);
 
       Score<kQuiets>();
-      PartialInsertionSort(cur_, end_moves_, -4000 * depth_ / kOnePly);
+      PartialInsertionSort(cur_, end_moves_, -3000 * depth_ / kOnePly);
       ++stage_;
       /* fallthrough */
 
@@ -326,22 +327,6 @@ top:
 
     case kQcheck:
       return Select<kNext>(Any);
-
-    case kProbSearchInit:
-      cur_ = moves_;
-      end_moves_ = generate<kLegalForSearch>(pos_, cur_);
-      for (auto &m : *this) m.value = MoveScore::evaluate(pos_, *ci_, m.move);
-      std::sort(cur_, end_moves_, [](const ExtMove &a, const ExtMove &b) {
-        return a.value > b.value;
-      });
-      max_score_ = cur_->value;
-      ++stage_;
-
-    case kProbSearch:
-      return Select<kNext>([&]() {
-        *score = score_ - max_score_;
-        return true;
-      });
   }
 
   assert(false);

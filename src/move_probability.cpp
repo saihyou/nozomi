@@ -28,7 +28,7 @@ int16_t g_score_capture[kPieceTypeMax][kPieceTypeMax][kNumberOfColor]
 int16_t g_score_check[2][kNumberOfColor][Eval::kScoreEnd];
 
 Value evaluate(const Position &pos, const CheckInfo &ci, Move move) {
-  Eval::KPPIndex *list_black = pos.black_kpp_list();
+  const Eval::KPPIndex *list_black = pos.black_kpp_list();
   Eval::KPPIndex black_king_index = Eval::kFKing + pos.square_king(kBlack);
   Eval::KPPIndex white_king_index = Eval::kEKing + pos.square_king(kWhite);
   Square from = move_from(move);
@@ -98,8 +98,6 @@ bool init() {
 }
 
 #ifdef LEARN
-#define USE_ADAM
-
 struct LearningParam {
 #ifdef USE_ADAM
   float m;
@@ -347,7 +345,7 @@ struct Gradient {
 
 void Gradient::increment(const Position &pos, const CheckInfo &ci, Move m,
                          float delta) {
-  Eval::KPPIndex *list_black = pos.black_kpp_list();
+  const Eval::KPPIndex *list_black = pos.black_kpp_list();
   Eval::KPPIndex black_king_index = Eval::kFKing + pos.square_king(kBlack);
   Eval::KPPIndex white_king_index = Eval::kEKing + pos.square_king(kWhite);
   Square from = move_from(m);

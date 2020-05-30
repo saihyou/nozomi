@@ -112,6 +112,12 @@ inline int FromTo(Move m) {
   return from * kBoardSquare + to;
 }
 
+inline int ToFrom(Move m) {
+  int from = m >> 7 & 0x7fU;
+  int to = m & 0x7fU;
+  return to * kBoardSquare + from;
+}
+
 inline PieceType 
 move_piece_type(Move m)
 {

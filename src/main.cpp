@@ -27,12 +27,9 @@
 #include "usi.h"
 #include "book.h"
 #include "learn.h"
-#include "reinforcer.h"
+#include "learn_nn.h"
 #include "kifu_maker.h"
 #include "move_probability.h"
-#ifdef APERY_BOOK
-#include "apery_book.h"
-#endif
 
 int
 main(int argc, char* argv[]) 
@@ -44,7 +41,7 @@ main(int argc, char* argv[])
 
   Position::initialize();
   Search::init();
-  Eval::init();
+  eval::Init();
   Threads.init();
   MoveScore::init();
 
@@ -56,7 +53,6 @@ main(int argc, char* argv[])
   if (Options["OwnBook"])
     Search::BookManager.open(Options["BookFile"]);
 #endif
-
 #ifndef LEARN
   USI::loop(argc, argv);
 #else
@@ -68,11 +64,17 @@ main(int argc, char* argv[])
   for (int i = 2; i < argc; ++i)
     cmd += std::string(argv[i]) + " ";
   std::istringstream is(cmd);
-
-  if (type == "reinforce")
+#if 0
+  if (type == "bonanza")
   {
-    std::unique_ptr<Reinforcer> reinforcer(new Reinforcer);
-    reinforcer->reinforce(is);
+    std::unique_ptr<Learner> learner(new Learner);
+    learner->learn(is);
+  }
+#endif
+  if (type == "learn")
+  {
+    std::unique_ptr<NnLearner> learner = std::make_unique<NnLearner>();
+    learner->Learn(is);
   }
   else if (type == "kifu")
   {

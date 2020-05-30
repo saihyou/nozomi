@@ -23,6 +23,7 @@
 */
 
 #include "search.h"
+
 #include <algorithm>
 #include <cassert>
 #include <cfloat>
@@ -30,6 +31,7 @@
 #include <cstring>
 #include <iostream>
 #include <sstream>
+
 #include "evaluate.h"
 #include "move_generator.h"
 #include "move_picker.h"
@@ -44,14 +46,13 @@ SignalsType Signals;
 LimitsType Limits;
 StateStackPtr SetupStates;
 #ifdef APERY_BOOK
-AperyBook     BookManager;
+AperyBook BookManager;
 #else
-Book          BookManager;
+Book BookManager;
 #endif
 Value DrawValue[kNumberOfColor];
 }  // namespace Search
 
-using Eval::evaluate;
 using std::string;
 using namespace Search;
 
@@ -59,12 +60,15 @@ namespace {
 // ノードの種類
 enum NodeType { kPV, kNonPV };
 
+constexpr uint64_t kTtHitAverageWindow = 4096;
+constexpr uint64_t kTtHitAverageResolution = 1024;
+
 // razor margin
 constexpr int kRazorMargin = 600;
 
 // futility margin
 inline Value futility_margin(Depth d, bool improving) {
-  return Value((175 - 50 * improving) * d / kOnePly);
+  return Value(217 * (d - improving));
 }
 
 constexpr int FutilityMoveCount(bool improving, int depth) {
@@ -79,10 +83,50 @@ inline Depth Reduction(bool i, Depth d, int mn) {
   return ((r + 512) / 1024 + (!i && r > 1024) - PvNode) * kOnePly;
 }
 
-int stat_bonus(Depth depth) {
-  int d = depth / kOnePly;
-  return d > 17 ? 0 : 29 * d * d + 138 * d - 134;
-}
+int stat_bonus(Depth d) { return d > 15 ? -8 : 19 * d * d + 155 * d - 132; }
+
+// Breadcrumbs are used to mark nodes as being searched by a given thread
+struct Breadcrumb {
+  std::atomic<Thread *> thread;
+  std::atomic<Key> key;
+};
+std::array<Breadcrumb, 1024> breadcrumbs;
+
+// ThreadHolding structure keeps track of which thread left breadcrumbs at the
+// given node for potential reductions. A free node will be marked upon entering
+// the moves loop by the constructor, and unmarked upon leaving that loop by the
+// destructor.
+struct ThreadHolding {
+  explicit ThreadHolding(Thread *this_thread, Key pos_key, int ply) {
+    location =
+        ply < 8 ? &breadcrumbs[pos_key & (breadcrumbs.size() - 1)] : nullptr;
+    other_thread = false;
+    owning = false;
+    if (location) {
+      // See if another already marked this location, if not, mark it ourselves
+      Thread *tmp = (*location).thread.load(std::memory_order_relaxed);
+      if (tmp == nullptr) {
+        (*location).thread.store(this_thread, std::memory_order_relaxed);
+        (*location).key.store(pos_key, std::memory_order_relaxed);
+        owning = true;
+      } else if (tmp != this_thread &&
+                 (*location).key.load(std::memory_order_relaxed) == pos_key)
+        other_thread = true;
+    }
+  }
+
+  ~ThreadHolding() {
+    if (owning)  // Free the marked location
+      (*location).thread.store(nullptr, std::memory_order_relaxed);
+  }
+
+  bool Marked() { return other_thread; }
+
+ private:
+  Breadcrumb *location;
+  bool other_thread;
+  bool owning;
+};
 
 template <NodeType NT>
 Value search(Position &pos, SearchStack *ss, Value alpha, Value beta,
@@ -96,14 +140,14 @@ Value value_to_tt(Value v, int ply);
 Value value_from_tt(Value v, int ply);
 void update_pv(Move *pv, Move move, Move *child_pv);
 
-void update_cm_stats(SearchStack *ss, Piece pc, Square s, int bonus);
-
-void update_stats(const Position &pos, SearchStack *ss, Move move, Move *quiets,
-                  int quiets_count, int bonus);
-
-void update_capture_stats(const Position &pos, Move move, Move *captures,
-                          int capture_count, int bonus);
-
+void UpdateAllStats(const Position &pos, SearchStack *ss, Move best_move,
+                    Value best_value, Value beta, Square prev_sq,
+                    Move *quiets_searched, int quiet_count,
+                    Move *captures_searched, int capture_count, Depth depth);
+void UpdateContinuationHistories(SearchStack *ss, Piece pc, Square to,
+                                 int bonus);
+void UpdateQuietStats(const Position &pos, SearchStack *ss, Move move,
+                      int bonus, int depth);
 void check_time();
 }  // namespace
 
@@ -155,7 +199,8 @@ void MainThread::search() {
 
   if (Options["OwnBook"] && !Limits.infinite && !Limits.mate) {
 #ifdef APERY_BOOK
-    std::tuple<Move, Value> book_move_score = BookManager.probe(root_pos_, Options["BookFile"], Options["Best_Book_Move"]);
+    std::tuple<Move, Value> book_move_score = BookManager.probe(
+        root_pos_, Options["BookFile"], Options["Best_Book_Move"]);
     Move book_move = std::get<0>(book_move_score);
 #else
     Move book_move = BookManager.get_move(root_pos_);
@@ -259,18 +304,32 @@ void Thread::search() {
   MainThread *main_thread = (this == Threads.main() ? Threads.main() : nullptr);
   double time_reduction = 1.0;
   double total_best_move_changes = 0;
+  int iter_index = 0;
 
   std::memset(ss - 7, 0, 10 * sizeof(SearchStack));
   for (int i = 7; i > 0; i--)
     (ss - i)->continuation_history =
-        &this->continuation_history_[kPieceNone][0];  // Use as sentinel
+        &this->continuation_history_[0][0][kPieceNone][0];  // Use as sentinel
 
   ss->pv = pv;
   completed_depth_ = kDepthZero;
 
-  size_t multi_pv = Options["MultiPV"];
+  if (main_thread) {
+    if (main_thread->previous_score == kValueInfinite) {
+      for (int i = 0; i < 4; i++) {
+        main_thread->iter_value[i] = kValueZero;
+      }
+    } else {
+      for (int i = 0; i < 4; i++) {
+        main_thread->iter_value[i] = main_thread->previous_score;
+      }
+    }
+  }
 
-  while (++root_depth_ < kDepthMax && !Signals.stop &&
+  size_t multi_pv = Options["MultiPV"];
+  tt_hit_average_ = kTtHitAverageWindow * kTtHitAverageResolution / 2;
+
+  while (++root_depth_ < kMaxPly && !Signals.stop &&
          (!Limits.depth || root_depth_ < Limits.depth)) {
     if (main_thread) {
       total_best_move_changes /= 2;
@@ -278,7 +337,10 @@ void Thread::search() {
 
     for (RootMove &rm : root_moves_) rm.previous_score = rm.score;
 
+    pv_last_ = 0;
+
     for (pv_index_ = 0; pv_index_ < multi_pv && !Signals.stop; ++pv_index_) {
+      pv_last_ = root_moves_.end() - root_moves_.begin();
       if (root_depth_ >= 5 * kOnePly) {
         delta = Value(64);
         alpha = std::max(root_moves_[pv_index_].previous_score - delta,
@@ -294,7 +356,8 @@ void Thread::search() {
         best_value = ::search<kPV>(root_pos_, ss, alpha, beta, adjusted_depth,
                                    false, false);
 
-        std::stable_sort(root_moves_.begin() + pv_index_, root_moves_.end());
+        std::stable_sort(root_moves_.begin() + pv_index_,
+                         root_moves_.begin() + pv_last_);
 
         if (Signals.stop) break;
 
@@ -314,6 +377,7 @@ void Thread::search() {
         } else if (best_value >= beta) {
           beta = std::min(best_value + delta, kValueInfinite);
         } else {
+          root_moves_[pv_index_].best_move_count++;
           break;
         }
 
@@ -350,7 +414,9 @@ void Thread::search() {
     if (Limits.use_time_management() && !Time.only_byoyomi()) {
       if (!Signals.stop && !Signals.stop_on_ponder_hit) {
         double falling_eval =
-            (314 + 9 * (main_thread->previous_score - best_value)) / 581.0;
+            (332 + 6 * (main_thread->previous_score - best_value) +
+             6 * (main_thread->iter_value[iter_index] - best_value)) /
+            704.0;
         falling_eval = (falling_eval < 0.5)
                            ? 0.5
                            : (falling_eval > 1.5) ? 1.5 : falling_eval;
@@ -379,6 +445,8 @@ void Thread::search() {
         }
       }
     }
+    main_thread->iter_value[iter_index] = best_value;
+    iter_index = (iter_index + 1) & 3;
   }
 
   if (!main_thread) return;
@@ -433,7 +501,7 @@ Value search(Position &pos, SearchStack *ss, Value alpha, Value beta,
   Move move;
   Move excluded_move;
   Move best_move;
-  Depth ext;
+  Depth extension;
   Depth new_depth;
   Value best_value;
   Value value;
@@ -441,15 +509,14 @@ Value search(Position &pos, SearchStack *ss, Value alpha, Value beta,
   Value eval;
   Value pure_static_eval;
   Value null_value;
-  bool in_check;
   bool gives_check;
-  bool singular_extension_node;
   bool capture;
   bool do_full_depth_search;
   bool tt_hit;
-  bool pv_hit;
+  bool tt_pv;
   bool move_count_pruning;
   bool improving;
+  bool did_lmr;
   Piece moved_piece;
   int move_count;
   int quiet_count;
@@ -457,7 +524,7 @@ Value search(Position &pos, SearchStack *ss, Value alpha, Value beta,
 
   // Initialize node
   Thread *this_thread = pos.this_thread();
-  in_check = pos.in_check();
+  ss->in_check = pos.in_check();
   Color us = pos.side_to_move();
   move_count = quiet_count = capture_count = ss->move_count = 0;
   best_value = -kValueInfinite;
@@ -489,8 +556,9 @@ Value search(Position &pos, SearchStack *ss, Value alpha, Value beta,
                                 : kNoRepetition;
     if (Signals.stop.load(std::memory_order_relaxed) ||
         repetition == kRepetition || ss->ply >= kMaxPly)
-      return ss->ply >= kMaxPly && !in_check ? evaluate(pos, ss)
-                                             : DrawValue[pos.side_to_move()];
+      return ss->ply >= kMaxPly && !ss->in_check
+                 ? eval::Evaluate(pos, ss)
+                 : DrawValue[pos.side_to_move()];
 
     // 連続王手千日手
     if (repetition == kPerpetualCheckWin) {
@@ -523,7 +591,8 @@ Value search(Position &pos, SearchStack *ss, Value alpha, Value beta,
   assert(0 <= ss->ply && ss->ply < kMaxPly);
 
   ss->current_move = (ss + 1)->excluded_move = best_move = kMoveNone;
-  ss->continuation_history = &this_thread->continuation_history_[kPieceNone][0];
+  ss->continuation_history =
+      &this_thread->continuation_history_[0][0][kPieceNone][0];
   (ss + 2)->killers[0] = (ss + 2)->killers[1] = kMoveNone;
   (ss + 2)->stat_score = 0;
   Square prev_sq = move_to((ss - 1)->current_move);
@@ -536,14 +605,25 @@ Value search(Position &pos, SearchStack *ss, Value alpha, Value beta,
     tt_move = root_node ? this_thread->root_moves_[this_thread->pv_index_].pv[0]
                         : (tt_hit ? tte->move() : kMoveNone);
     tt_value = tt_hit ? value_from_tt(tte->value(), ss->ply) : kValueNone;
-    pv_hit = (tt_hit && tte->pv_hit()) || (pv_node && depth > 4 * kOnePly);
+    tt_pv = (tt_hit && tte->pv_hit()) || pv_node;
   } else {
     tt_move = kMoveNone;
     tt_value = kValueZero;
     tt_hit = false;
-    pv_hit = false;
+    tt_pv = false;
     tte = nullptr;
   }
+
+  if (tt_pv && depth > 12 && ss->ply - 1 < kMaxLowPlyHistory &&
+      !move_is_capture((ss - 1)->current_move) &&
+      is_ok((ss - 1)->current_move)) {
+    this_thread->low_ply_history_[ss->ply - 1][FromTo((ss - 1)->current_move)]
+        << stat_bonus(depth - 5);
+  }
+  this_thread->tt_hit_average_ = (kTtHitAverageWindow - 1) *
+                                     this_thread->tt_hit_average_ /
+                                     kTtHitAverageWindow +
+                                 kTtHitAverageResolution * tt_hit;
 
   // PV nodeのときはtransposition tableの手を使用しない
   if (!pv_node && tt_hit && tte->depth() >= depth &&
@@ -553,20 +633,18 @@ Value search(Position &pos, SearchStack *ss, Value alpha, Value beta,
     if (tt_move) {
       if (tt_value >= beta) {
         if (!move_is_capture(tt_move))
-          update_stats(pos, ss, tt_move, nullptr, 0, stat_bonus(depth));
-        else
-          update_capture_stats(pos, tt_move, nullptr, 0, stat_bonus(depth));
+          UpdateQuietStats(pos, ss, tt_move, stat_bonus(depth), depth);
 
-        if ((ss - 1)->move_count == 1 &&
+        if ((ss - 1)->move_count <= 2 &&
             !move_is_capture((ss - 1)->current_move))
-          update_cm_stats(ss - 1, prev_piece, prev_sq,
-                          -stat_bonus(depth + kOnePly));
+          UpdateContinuationHistories(ss - 1, prev_piece, prev_sq,
+                                      -stat_bonus(depth + kOnePly));
       } else if (!move_is_capture(tt_move)) {
         int penalty = -stat_bonus(depth);
         Piece tt_piece = move_piece(tt_move, pos.side_to_move());
         Square tt_to = move_to(tt_move);
         this_thread->main_history_[us][FromTo(tt_move)] << penalty;
-        update_cm_stats(ss, tt_piece, tt_to, penalty);
+        UpdateContinuationHistories(ss, tt_piece, tt_to, penalty);
       }
     }
 
@@ -575,11 +653,11 @@ Value search(Position &pos, SearchStack *ss, Value alpha, Value beta,
 
   // 1手詰め判定
   // 処理が重いのでなるべくなら呼び出さないようにしたい
-  if (!root_node && !skip_mate && !tt_hit && !in_check) {
+  if (!root_node && !skip_mate && !tt_hit && !ss->in_check) {
     Move mate_move;
     if ((mate_move = search_mate1ply(pos)) != kMoveNone) {
       ss->static_eval = best_value = MateIn(ss->ply + 1);
-      tte->Save(position_key, value_to_tt(best_value, ss->ply), pv_hit,
+      tte->Save(position_key, value_to_tt(best_value, ss->ply), tt_pv,
                 kBoundExact, depth, mate_move, TT.generation());
 
       return best_value;
@@ -587,8 +665,8 @@ Value search(Position &pos, SearchStack *ss, Value alpha, Value beta,
   }
 
   // 現局面の静的評価
-  ss->static_eval = pure_static_eval = evaluate(pos, ss);
-  if (in_check) {
+  ss->static_eval = pure_static_eval = eval::Evaluate(pos, ss);
+  if (ss->in_check) {
     ss->static_eval = eval = pure_static_eval = kValueNone;
     improving = false;
     goto moves_loop;
@@ -607,7 +685,7 @@ Value search(Position &pos, SearchStack *ss, Value alpha, Value beta,
       eval = ss->static_eval;
     }
     if (tte != nullptr)
-      tte->Save(position_key, kValueNone, pv_hit, kBoundNone, kDepthNone,
+      tte->Save(position_key, kValueNone, tt_pv, kBoundNone, kDepthNone,
                 kMoveNone, TT.generation());
   }
 
@@ -620,7 +698,7 @@ Value search(Position &pos, SearchStack *ss, Value alpha, Value beta,
               (ss - 2)->static_eval == kValueNone;
 
   // Futility pruning: child node
-  if (!pv_node && depth < 7 * kOnePly &&
+  if (!pv_node && depth < 6 &&
       eval - futility_margin(depth, improving) >= beta && eval < kValueKnownWin)
     return eval;
 
@@ -630,7 +708,8 @@ Value search(Position &pos, SearchStack *ss, Value alpha, Value beta,
       (pure_static_eval >= beta - 36 * depth / kOnePly + 225) &&
       !excluded_move) {
     ss->current_move = kMoveNull;
-    ss->continuation_history = &this_thread->continuation_history_[kEmpty][0];
+    ss->continuation_history =
+        &this_thread->continuation_history_[0][0][kEmpty][0];
 
     assert(eval - beta >= 0);
 
@@ -656,7 +735,7 @@ Value search(Position &pos, SearchStack *ss, Value alpha, Value beta,
 
   // ProbCut
   if (!pv_node && depth >= 5 * kOnePly && abs(beta) < kValueMateInMaxPly) {
-    Value rbeta = std::min(beta + 216 - 48 * improving, kValueInfinite);
+    Value rbeta = std::min(beta + 189 - 45 * improving, kValueInfinite);
     assert((ss - 1)->current_move != kMoveNone);
     assert((ss - 1)->current_move != kMoveNull);
 
@@ -665,17 +744,20 @@ Value search(Position &pos, SearchStack *ss, Value alpha, Value beta,
     CheckInfo ci(pos);
     int prob_cut_count = 0;
 
-    while ((move = mp.NextMove()) != kMoveNone && prob_cut_count < 3) {
-      if (pos.legal(move, ci.pinned)) {
+    while (
+        (move = mp.NextMove()) != kMoveNone &&
+        prob_cut_count < 2 + 2 * cut_node &&
+        !(move == tt_move && tte->depth() >= depth - 4 && tt_value < rbeta)) {
+      if (move != excluded_move && pos.legal(move, ci.pinned)) {
         ++prob_cut_count;
 
         ss->current_move = move;
         ss->continuation_history =
-            &this_thread
-                 ->continuation_history_[move_piece(move, us)][move_to(move)];
+            &this_thread->continuation_history_[ss->in_check][move_is_capture(
+                (ss - 1)->current_move)][move_piece(move, us)][move_to(move)];
         pos.do_move(move, st);
         (ss + 1)->evaluated = false;
-        value = pos.in_check()
+        value = ss->in_check
                     ? -qsearch<kNonPV, true>(pos, ss + 1, -rbeta, -rbeta + 1,
                                              kDepthZero, false)
                     : -qsearch<kNonPV, false>(pos, ss + 1, -rbeta, -rbeta + 1,
@@ -698,7 +780,7 @@ Value search(Position &pos, SearchStack *ss, Value alpha, Value beta,
 
     tte = TT.Probe(position_key, &tt_hit);
     tt_move = tt_hit ? tte->move() : kMoveNone;
-    pv_hit = tt_hit && tte->pv_hit();
+    tt_pv = tt_hit && tte->pv_hit();
   }
 
 moves_loop:
@@ -711,19 +793,23 @@ moves_loop:
   Move countermove = this_thread->counter_moves_[prev_piece][prev_sq];
   CheckInfo ci(pos);
   MovePicker mp(pos, &ci, tt_move, depth, &this_thread->main_history_,
-                &this_thread->capture_history_, cont_hist, countermove,
-                ss->killers);
+                &this_thread->low_ply_history_, &this_thread->capture_history_,
+                cont_hist, countermove, ss->killers,
+                depth > 12 ? ss->ply : kMaxPly);
   value = best_value;
-  singular_extension_node = !root_node && depth >= 8 * kOnePly &&
-                            tt_move != kMoveNone && tt_value != kValueNone &&
-                            !excluded_move && (tte->bound() & kBoundLower) &&
-                            tte->depth() >= depth - 3 * kOnePly;
 
   Move current_best_move = kMoveNone;
   bool tt_capture = false;
-  int move_value = 0;
+  bool singular_extension_node =
+      !root_node && depth >= 8 * kOnePly && tt_move != kMoveNone &&
+      tt_value != kValueNone && !excluded_move &&
+      (tte->bound() & kBoundLower) && tte->depth() >= depth - 3 * kOnePly;
+
+  // Mark this node as being searched
+  ThreadHolding th(this_thread, position_key, ss->ply);
+
   // Loop through moves
-  while ((move = mp.NextMove(&move_value)) != kMoveNone) {
+  while ((move = mp.NextMove()) != kMoveNone) {
     assert(is_ok(move));
 
     if (move == excluded_move) continue;
@@ -744,7 +830,7 @@ moves_loop:
 #endif
     if (pv_node) (ss + 1)->pv = nullptr;
 
-    ext = kDepthZero;
+    extension = kDepthZero;
 
     // Stockfishだとpromotionも入っているが将棋としてはpromotionなんて普通の手なので除外
     capture = move_is_capture(move);
@@ -766,19 +852,28 @@ moves_loop:
       ss->excluded_move = kMoveNone;
 
       if (value < singular_beta) {
-        ext = kOnePly;
-      } else if (cut_node && singular_beta > beta) {
-        return beta;
+        extension = kOnePly;
+      } else if (singular_beta > beta) {
+        return singular_beta;
+      } else if (tt_value >= beta) {
+        ss->excluded_move = move;
+        value = search<kNonPV>(pos, ss, beta - 1, beta, (depth + 3) / 2,
+                               cut_node, true);
+        ss->excluded_move = kMoveNone;
+        if (value >= beta) return beta;
       }
     } else if (gives_check && ((move_capture(move) & 0xF) >= kSilver ||
                                pos.continuous_checks(pos.side_to_move()) > 2)) {
-      ext = kOnePly;
+      extension = kOnePly;
     }
 
-    new_depth = depth - kOnePly + ext;
+    new_depth = depth - kOnePly + extension;
 
     // Pruning at shallow depth
     if (!pv_node && best_value > kValueMatedInMaxPly) {
+      int lmr_depth =
+          std::max(new_depth - Reduction<pv_node>(improving, depth, move_count),
+                   kDepthZero);
       if (!capture && !gives_check) {
         // Move count based pruning
         if (move_count_pruning) {
@@ -789,11 +884,6 @@ moves_loop:
           continue;
         }
 
-        int lmr_depth = std::max(new_depth - Reduction<pv_node>(
-                                                 improving, depth, move_count),
-                                 kDepthZero) /
-                        kOnePly;
-
         // Countermove based pruning
         if (lmr_depth < 3 + ((ss - 1)->stat_score > 0) &&
             ((*cont_hist[0])[moved_piece][move_to(move)] <
@@ -803,17 +893,27 @@ moves_loop:
           continue;
 
         // Futility pruning: parent node
-        if (lmr_depth < 7 && !in_check &&
+        if (lmr_depth < 7 && !ss->in_check &&
             ss->static_eval + 256 + 200 * lmr_depth <= alpha)
           continue;
 
         if (lmr_depth < 8 &&
             !pos.see_ge(move, Value(-35 * lmr_depth * lmr_depth)))
           continue;
-      } else if (depth < 7 * kOnePly && !ext &&
-                 ((move_capture(move) & 0xF) < kSilver)) {
-        Value v = -Value(400 + 100 * depth / kOnePly);
-        if (!pos.see_ge(move, v)) continue;
+      } else {
+        if (!gives_check) {
+          auto &capture_history = this_thread->capture_history_;
+          if (lmr_depth < 1 &&
+              capture_history[moved_piece][move_to(move)][move_capture(move)] <
+                  0) {
+            continue;
+          }
+        }
+        if (depth < 7 * kOnePly && !extension &&
+            ((move_capture(move) & 0xF) < kSilver)) {
+          Value v = -Value(400 + 100 * depth / kOnePly);
+          if (!pos.see_ge(move, v)) continue;
+        }
       }
     }
 
@@ -828,7 +928,8 @@ moves_loop:
 
     ss->current_move = move;
     ss->continuation_history =
-        &this_thread->continuation_history_[moved_piece][move_to(move)];
+        &this_thread->continuation_history_[ss->in_check][move_is_capture(
+            (ss - 1)->current_move)][moved_piece][move_to(move)];
 
     // Make the move
     pos.do_move(move, st, gives_check);
@@ -838,9 +939,12 @@ moves_loop:
     if (depth >= 3 * kOnePly && move_count > 1) {
       Depth r = Reduction<pv_node>(improving, depth, move_count);
 
-      if (pv_hit) r -= kOnePly;
+      if (tt_pv) r -= kOnePly;
 
       if (gives_check) r -= kOnePly;
+
+      // Reduction if other threads are searching this position.
+      if (th.Marked()) r += kOnePly;
 
       if (capture) {
         r -= kOnePly;
@@ -867,17 +971,16 @@ moves_loop:
                      (r / kOnePly - ss->stat_score / 20000) * kOnePly);
       }
 
-      if ((pv_node && move_value < -6000) || (!pv_node && move_value < -3000))
-        r += kOnePly;
-
       Depth d = std::max(new_depth - std::max(r, kDepthZero), kOnePly);
 
       value = -search<kNonPV>(pos, ss + 1, -(alpha + 1), -alpha, d, true,
                               d < 3 * kOnePly);
 
       do_full_depth_search = (value > alpha && d != kDepthZero);
+      did_lmr = true;
     } else {
       do_full_depth_search = !pv_node || move_count > 1;
+      did_lmr = false;
     }
 
     // Full depth search
@@ -891,6 +994,14 @@ moves_loop:
                                                -alpha, kDepthZero))
               : -search<kNonPV>(pos, ss + 1, -(alpha + 1), -alpha, new_depth,
                                 !cut_node, new_depth < 3 * kOnePly);
+      if (did_lmr && !capture) {
+        int bonus =
+            value > alpha ? stat_bonus(new_depth) : -stat_bonus(new_depth);
+
+        if (move == ss->killers[0]) bonus += bonus / 4;
+
+        UpdateContinuationHistories(ss, moved_piece, move_to(move), bonus);
+      }
     }
 
     if (pv_node &&
@@ -964,23 +1075,17 @@ moves_loop:
             ? alpha
             : MatedIn(ss->ply - 1);  // すでに合法手がないので1手前で詰んでいる
   } else if (best_move != kMoveNone) {
-    if (!move_is_capture(best_move))
-      update_stats(pos, ss, best_move, quiets_searched, quiet_count,
-                   stat_bonus(depth));
-
-    update_capture_stats(pos, best_move, capture_searched, capture_count,
-                         stat_bonus(depth));
-
-    if ((ss - 1)->move_count == 1 && !move_is_capture((ss - 1)->current_move))
-      update_cm_stats(ss - 1, prev_piece, prev_sq,
-                      -stat_bonus(depth + kOnePly));
-  } else if (depth >= 3 * kOnePly && !move_is_capture((ss - 1)->current_move) &&
+    UpdateAllStats(pos, ss, best_move, best_value, beta, prev_sq,
+                   quiets_searched, quiet_count, capture_searched,
+                   capture_count, depth);
+  } else if ((depth >= 3 || pv_node) &&
+             !move_is_capture((ss - 1)->current_move) &&
              is_ok((ss - 1)->current_move)) {
-    update_cm_stats(ss - 1, prev_piece, prev_sq, stat_bonus(depth));
+    UpdateContinuationHistories(ss - 1, prev_piece, prev_sq, stat_bonus(depth));
   }
 
   if (excluded_move == kMoveNone && best_value != DrawValue[pos.side_to_move()])
-    tte->Save(position_key, value_to_tt(best_value, ss->ply), pv_hit,
+    tte->Save(position_key, value_to_tt(best_value, ss->ply), tt_pv,
               best_value >= beta
                   ? kBoundLower
                   : (pv_node && best_move ? kBoundExact : kBoundUpper),
@@ -1021,7 +1126,7 @@ Value qsearch(Position &pos, SearchStack *ss, Value alpha, Value beta,
   bool tt_hit;
   bool pv_hit;
   int move_count = 0;
-
+  ss->in_check = InCheck;
   if (PvNode) {
     old_alpha = alpha;
 
@@ -1030,8 +1135,7 @@ Value qsearch(Position &pos, SearchStack *ss, Value alpha, Value beta,
   }
 
   Thread *this_thread = pos.this_thread();
-  ss->current_move = best_move = kMoveNone;
-  ss->continuation_history = &this_thread->continuation_history_[kPieceNone][0];
+  best_move = kMoveNone;
   ss->ply = (ss - 1)->ply + 1;
 
   if (pos.is_decralation_win()) return MateIn(ss->ply - 1);
@@ -1062,7 +1166,7 @@ Value qsearch(Position &pos, SearchStack *ss, Value alpha, Value beta,
       return kValueSamePosition;
   }
 #else
-  if (ss->ply >= kMaxPly) return evaluate(pos, ss);
+  if (ss->ply >= kMaxPly) return eval::Evaluate(pos, ss);
 #endif
   tt_depth =
       InCheck || depth >= kDepthQsChecks ? kDepthQsChecks : kDepthQsNoChecks;
@@ -1080,7 +1184,7 @@ Value qsearch(Position &pos, SearchStack *ss, Value alpha, Value beta,
     return tt_value;
   }
 
-  ss->static_eval = evaluate(pos, ss);
+  ss->static_eval = eval::Evaluate(pos, ss);
 
   // 現局面の静的評価
   if (InCheck) {
@@ -1118,7 +1222,7 @@ Value qsearch(Position &pos, SearchStack *ss, Value alpha, Value beta,
 
     if (PvNode && best_value > alpha) alpha = best_value;
 
-    futility_base = best_value + 128;
+    futility_base = best_value + 154;
   }
 
   const PieceToHistory *cont_hist[] = {(ss - 1)->continuation_history,
@@ -1174,8 +1278,10 @@ Value qsearch(Position &pos, SearchStack *ss, Value alpha, Value beta,
     }
 
     ss->current_move = move;
-    ss->continuation_history = &this_thread->continuation_history_[move_piece(
-        move, pos.side_to_move())][move_to(move)];
+    ss->continuation_history =
+        &this_thread->continuation_history_[InCheck][move_is_capture(
+            (ss - 1)->current_move)][move_piece(move, pos.side_to_move())]
+                                           [move_to(move)];
 
     pos.do_move(move, st, gives_check);
     (ss + 1)->evaluated = false;
@@ -1237,53 +1343,86 @@ void update_pv(Move *pv, Move move, Move *child_pv) {
   *pv = kMoveNone;
 }
 
-void update_cm_stats(SearchStack *ss, Piece pc, Square to, int bonus) {
-  for (int i : {1, 2, 4, 6})
-    if (is_ok((ss - i)->current_move))
-      (*(ss - i)->continuation_history)[pc][to] << bonus;
+void UpdateAllStats(const Position &pos, SearchStack *ss, Move best_move,
+                    Value best_value, Value beta, Square prev_sq,
+                    Move *quiets_searched, int quiet_count,
+                    Move *captures_searched, int capture_count, Depth depth) {
+  int bonus1, bonus2;
+  Color us = pos.side_to_move();
+  Thread *this_thread = pos.this_thread();
+  CapturePieceToHistory &capture_history = this_thread->capture_history_;
+  Piece moved_piece = move_piece(best_move, pos.side_to_move());
+  PieceType captured = move_capture(best_move);
+
+  bonus1 = stat_bonus(depth + 1);
+  bonus2 = best_value > beta + Eval::PieceValueTable[kPawn]
+               ? bonus1              // larger bonus
+               : stat_bonus(depth);  // smaller bonus
+
+  if (!move_is_capture(best_move)) {
+    UpdateQuietStats(pos, ss, best_move, bonus2, depth);
+
+    // Decrease all the non-best quiet moves
+    for (int i = 0; i < quiet_count; ++i) {
+      this_thread->main_history_[us][FromTo(quiets_searched[i])] << -bonus2;
+      UpdateContinuationHistories(
+          ss, move_piece(quiets_searched[i], pos.side_to_move()),
+          move_to(quiets_searched[i]), -bonus2);
+    }
+  } else
+    capture_history[moved_piece][move_to(best_move)][captured] << bonus1;
+
+  // Extra penalty for a quiet TT or main killer move in previous ply when it
+  // gets refuted
+  if (((ss - 1)->move_count == 1 ||
+       ((ss - 1)->current_move == (ss - 1)->killers[0])) &&
+      !move_is_capture((ss - 1)->current_move))
+    UpdateContinuationHistories(
+        ss - 1, move_piece((ss - 1)->current_move, ~pos.side_to_move()),
+        prev_sq, -bonus1);
+
+  // Decrease all the non-best capture moves
+  for (int i = 0; i < capture_count; ++i) {
+    moved_piece = move_piece(captures_searched[i], pos.side_to_move());
+    captured = move_capture(captures_searched[i]);
+    capture_history[moved_piece][move_to(captures_searched[i])][captured]
+        << -bonus1;
+  }
 }
 
-void update_stats(const Position &pos, SearchStack *ss, Move move, Move *quiets,
-                  int quiets_count, int bonus) {
+void UpdateContinuationHistories(SearchStack *ss, Piece pc, Square to,
+                                 int bonus) {
+  for (int i : {1, 2, 4, 6}) {
+    if (ss->in_check && i > 2) break;
+    if (is_ok((ss - i)->current_move))
+      (*(ss - i)->continuation_history)[pc][to] << bonus;
+  }
+}
+
+void UpdateQuietStats(const Position &pos, SearchStack *ss, Move move,
+                      int bonus, int depth) {
   if (ss->killers[0] != move) {
     ss->killers[1] = ss->killers[0];
     ss->killers[0] = move;
   }
 
   Color us = pos.side_to_move();
-  Piece moved_piece = move_piece(move, pos.side_to_move());
-
   Thread *this_thread = pos.this_thread();
-
   this_thread->main_history_[us][FromTo(move)] << bonus;
-  update_cm_stats(ss, moved_piece, move_to(move), bonus);
+  UpdateContinuationHistories(ss, move_piece(move, pos.side_to_move()),
+                              move_to(move), bonus);
+
+  if (move_piece_type(move) != kPawn)
+    this_thread->main_history_[us][ToFrom(move)] << -bonus;
+
   if (is_ok((ss - 1)->current_move)) {
-    Square prev_sq = move_to((ss - 1)->current_move);
-    Piece prev_piece = move_piece((ss - 1)->current_move, ~us);
-    this_thread->counter_moves_[prev_piece][prev_sq] = move;
+    this_thread->counter_moves_[move_piece((ss - 1)->current_move, ~us)]
+                               [move_to((ss - 1)->current_move)] = move;
   }
 
-  for (int i = 0; i < quiets_count; ++i) {
-    Move m = quiets[i];
-    this_thread->main_history_[us][FromTo(quiets[i])] << -bonus;
-    update_cm_stats(ss, move_piece(m, pos.side_to_move()), move_to(m), -bonus);
-  }
-}
-
-void update_capture_stats(const Position &pos, Move move, Move *captures,
-                          int capture_count, int bonus) {
-  CapturePieceToHistory &capture_history = pos.this_thread()->capture_history_;
-  Piece moved_piece = move_piece(move, pos.side_to_move());
-  PieceType captured = move_capture(move);
-
-  if (captured != kPieceNone)
-    capture_history[moved_piece][move_to(move)][captured] << bonus;
-
-  for (int i = 0; i < capture_count; ++i) {
-    moved_piece = move_piece(captures[i], pos.side_to_move());
-    captured = move_capture(captures[i]);
-    capture_history[moved_piece][move_to(move)][captured] << bonus;
-  }
+  if (depth > 12 && ss->ply < kMaxLowPlyHistory)
+    this_thread->low_ply_history_[ss->ply][FromTo(move)]
+        << stat_bonus(depth - 7);
 }
 
 void check_time() {
