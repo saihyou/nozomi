@@ -1,6 +1,6 @@
 OBJS = bit_board.o move_generator.o position.o usi.o usioption.o misc.o thread.o timeman.o transposition_table.o move_picker.o evaluate_nn.o search.o move_probability.o benchmark.o book.o main.o
 
-CPPFLAGS = -Wall -std=c++1z -DHAVE_SSE4 -march=native
+CPPFLAGS = -Wall -std=c++1z -DHAVE_SSE4 -march=native -mbmi2
 LDFLAGS = -pthread
 
 ifdef DEBUG
